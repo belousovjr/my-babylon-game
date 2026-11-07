@@ -32,6 +32,7 @@ app.innerHTML = `
   <div id="intro"><span class="eyebrow">ПЕСОЧНИЦА / ОФЛАЙН</span><h1>Chicago Loop<br>от улицы до силуэта.</h1><p>Река, мосты и архитектура центра Чикаго.</p></div>
   <aside id="editor" hidden aria-label="Редактор карты">
     <div class="panel-heading"><span class="eyebrow">МАСТЕРСКАЯ</span><h2>Редактор локации</h2></div>
+    <p id="camera-coordinates" class="muted"></p>
     <p class="muted">Клик по объекту — выбор. ПКМ + WASD — полёт. Q / E — вниз / вверх.</p>
     <div class="tools"><button data-tool="position" class="active">Перенос</button><button data-tool="rotation">Поворот</button><button data-tool="scale">Размер</button></div>
     <label class="check"><input id="snap" type="checkbox" checked> Привязка · перенос 1 м / размер 0,25 м / 15°</label>
@@ -91,6 +92,34 @@ editorCamera.keysUp = [87]; editorCamera.keysDown = [83];
 editorCamera.keysLeft = [65]; editorCamera.keysRight = [68];
 editorCamera.keysUpward = [69]; editorCamera.keysDownward = [81];
 editorCamera.inputs.removeByType('FreeCameraTouchInput');
+const editorCameraStorageKey = 'block-district-editor-camera-v1';
+let hasEditorCameraPose = false;
+let savedEditorCameraPose = '';
+try {
+  const raw = localStorage.getItem(editorCameraStorageKey);
+  if (raw) {
+    const pose = JSON.parse(raw);
+    if ([pose.position, pose.rotation].every(v => Array.isArray(v) && v.length === 3 && v.every(n => typeof n === 'number' && Number.isFinite(n) && Math.abs(n) <= 1e6))) {
+      editorCamera.position.copyFromFloats(...pose.position as [number, number, number]);
+      editorCamera.rotation.copyFromFloats(...pose.rotation as [number, number, number]);
+      hasEditorCameraPose = true;
+      savedEditorCameraPose = raw;
+    }
+  }
+} catch { /* Use the initial view if storage is unavailable or invalid. */ }
+function saveEditorCamera() {
+  if (!hasEditorCameraPose) return;
+  const pose = JSON.stringify({ position: editorCamera.position.asArray(), rotation: editorCamera.rotation.asArray() });
+  if (pose === savedEditorCameraPose) return;
+  try { localStorage.setItem(editorCameraStorageKey, pose); savedEditorCameraPose = pose; }
+  catch { /* Camera persistence must not interrupt editing when storage is full or blocked. */ }
+}
+function describeEditorCamera() {
+  const p = editorCamera.position;
+  $('camera-coordinates').textContent = `Камера · X ${p.x.toFixed(1)} / Y ${p.y.toFixed(1)} / Z ${p.z.toFixed(1)} м`;
+}
+window.addEventListener('pagehide', saveEditorCamera);
+
 const followCamera = new UniversalCamera('follow-view', camera.position.clone(), scene);
 followCamera.minZ = 0.05; followCamera.maxZ = camera.maxZ;
 const cameraBoom = new FollowCamera();
@@ -312,8 +341,12 @@ function setMode() {
   if (editing) {
     cameraBoom.reset();
     camera.detachControl();
-    editorCamera.position.copyFrom(player.position).addInPlaceFromFloats(0, 18, -18);
-    editorCamera.setTarget(player.position.add(new Vector3(0, 1, 0)));
+    if (!hasEditorCameraPose) {
+      editorCamera.position.copyFrom(player.position).addInPlaceFromFloats(0, 18, -18);
+      editorCamera.setTarget(player.position.add(new Vector3(0, 1, 0)));
+      hasEditorCameraPose = true;
+    }
+    describeEditorCamera();
     scene.activeCamera = editorCamera; editorCamera.attachControl(canvas, true);
     // Keep editor keyboard flight scoped to the canvas, not form controls.
     const mouse = editorCamera.inputs.attached.mouse;
@@ -322,6 +355,7 @@ function setMode() {
     for (const m of meshes.values()) m.setEnabled(true);
     notify('Редактор · изменения применяются сразу. Сохраните карту перед выходом.');
   } else {
+    saveEditorCamera();
     editorCamera.detachControl(); scene.activeCamera = followCamera; camera.attachControl(canvas, true);
     select(null); respawn(); notify('Режим игры · карта применена');
   }
@@ -545,7 +579,7 @@ engine.runRenderLoop(() => {
     statsTime = 0;
     const count = [...meshes.values()].filter(m => m.isEnabled()).length;
     $('stats').textContent = `${Math.round(engine.getFps())} FPS · ${count} зданий · ${scene.getActiveMeshes().length} мешей · ячейка ${cellAt(player.position.x, player.position.z)}`;
-    if (editing) describeSelection();
+    if (editing) { describeSelection(); describeEditorCamera(); saveEditorCamera(); }
   }
 });
 window.addEventListener('resize', () => engine.resize());
