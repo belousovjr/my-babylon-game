@@ -7,7 +7,7 @@ import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js'
 import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
 import { Ray } from '@babylonjs/core/Culling/ray.js';
 import { createWorld, parseWorld } from '../src/world.ts';
-import { buildArchitecture } from '../src/architecture.ts';
+import { buildArchitecture, createCollisionPrototype } from '../src/architecture.ts';
 import { drawChicagoStreets } from '../src/streets.ts';
 import { boxEntry } from '../src/followCamera.ts';
 import data from '../src/generated/chicago.json' with { type: 'json' };
@@ -20,6 +20,7 @@ test('Chicago snapshot has measured scale, landmark heights, valid templates and
   assert.ok(data.report.heights.estimated>0,'estimated heights explicitly reported');
   const engine=new NullEngine(),scene=new Scene(engine),mat=new StandardMaterial('shared',scene);
   const accent=new StandardMaterial('accent',scene);accent.zOffset=-1;accent.zOffsetUnits=-1;
+  const collisionBounds=createCollisionPrototype(scene).getBoundingInfo().boundingBox;
   for(const template of w.templates) {
     const levels=buildArchitecture(template,scene,mat,accent);
     assert.equal(levels.length,(template.lodDistances?.length??0)+1);
@@ -27,6 +28,9 @@ test('Chicago snapshot has measured scale, landmark heights, valid templates and
     assert.ok(counts.every(n=>n>0&&n<2000));
     assert.ok(counts.every((n,i)=>i===0||n<=counts[i-1]),`${template.id}: LOD reduces triangles`);
     for(const level of levels) {
+      const bounds=level.getBoundingInfo().boundingBox;
+      if(template.kind==='building') assert.ok(bounds.minimum.x>=collisionBounds.minimum.x-1e-6 && bounds.maximum.x<=collisionBounds.maximum.x+1e-6);
+      if(template.kind==='building') assert.ok(bounds.minimum.z>=collisionBounds.minimum.z-1e-6 && bounds.maximum.z<=collisionBounds.maximum.z+1e-6);
       assert.ok(level.subMeshes.length<=2,'body and decoration stay batched');
       if(['glass','stone'].includes(template.profile!) && level!==levels.at(-1)) {
         assert.equal(level.subMeshes.length,2);

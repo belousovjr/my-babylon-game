@@ -18,7 +18,7 @@ import { CELL_SIZE, cellAt, createWorld, parseWorld, objectProperties, setObject
 import type { Kind, ObjectTemplate, Triple, WorldData, WorldObject } from './world';
 import { initialPlayerState, stepPlayer } from './player';
 import { FollowCamera, MIN_CAMERA_DISTANCE } from './followCamera';
-import { buildArchitecture, PROFILES } from './architecture';
+import { attachCollisionGeometry, buildArchitecture, createCollisionPrototype, PROFILES } from './architecture';
 import type { Profile } from './architecture';
 import type { InstancedMesh } from '@babylonjs/core/Meshes/instancedMesh.js';
 import { drawChicagoStreets } from './streets';
@@ -143,8 +143,7 @@ const modelLevels = new Map<Mesh, InstancedMesh[]>();
 let proceduralMeshes: Mesh[] = [];
 const furnitureRoots: Mesh[] = [];
 let previewLod = -1;
-const colliderSource = MeshBuilder.CreateBox('collision-prototype', { size: 1 }, scene);
-colliderSource.setEnabled(false);
+const colliderSource = createCollisionPrototype(scene);
 
 let activeCell = "";
 let world: WorldData = createWorld();
@@ -155,6 +154,7 @@ try {
 } catch { startupMessage = 'Сохранённая карта недоступна. Открыт Chicago Loop.'; }
 function updateCellCoverage(mesh: Mesh) {
   mesh.computeWorldMatrix(true);
+  for (const child of mesh.getChildMeshes()) if (child.metadata?.collisionOnly) child.computeWorldMatrix(true);
   const bounds = mesh.getBoundingInfo().boundingBox;
   mesh.metadata.minCellX = Math.floor(bounds.minimumWorld.x / CELL_SIZE);
   mesh.metadata.maxCellX = Math.floor(bounds.maximumWorld.x / CELL_SIZE);
@@ -171,6 +171,7 @@ function attachModel(root: Mesh, template: ObjectTemplate, color: string, pickab
     instance.metadata = { worldId: root.name }; instance.setEnabled(i === sources.length - 1);
     return instance;
   });
+  attachCollisionGeometry(root, sources[0]!);
   modelLevels.set(root, levels);
 }
 function addMesh(o: WorldObject) {
@@ -231,6 +232,7 @@ function rebuild() {
 }
 const player = MeshBuilder.CreateBox('player-collider', { size: 1 }, scene);
 player.isVisible = false; player.isPickable = false;
+player.collisionMask = 1;
 player.ellipsoid.set(0.35, 0.9, 0.35); player.ellipsoidOffset.set(0, 0.9, 0);
 const visual = new TransformNode('player-visual', scene);
 visual.parent = player;

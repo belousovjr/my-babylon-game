@@ -166,7 +166,8 @@ def street_lamps(roads,sidewalks,asphalt):
                 point=nearest_points(desired,safe)[1]
                 if desired.distance(point)>4 or point.distance(asphalt)>1.2:continue
                 if any(point.distance(Point(lamp['position'][0],lamp['position'][2]))<8 for lamp in lamps):continue
-                lamps.append(dict(templateId='lamp',position=[point.x,.16,point.y],yaw=-math.atan2(dz,dx)))
+                road_edge=nearest_points(point,asphalt)[1]
+                lamps.append(dict(templateId='lamp',position=[point.x,.16,point.y],yaw=-math.atan2(road_edge.y-point.y,road_edge.x-point.x)))
     return lamps
 
 def railway_support_candidates(points,sidewalks,asphalt,lowered_banks,deck,ground):

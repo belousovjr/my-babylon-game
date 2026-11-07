@@ -17,7 +17,7 @@ export function stepPlayer(scene: Scene, body: Mesh, state: PlayerState, input: 
   state.moving = direction.lengthSquared() > 0;
   state.running = state.moving && input.run;
   if (state.moving) direction.normalize();
-  const hit = scene.pickWithRay(new Ray(body.position.add(new Vector3(0, 0.12, 0)), Vector3.Down(), 0.22), m => m.checkCollisions && !!m.metadata?.worldId && m.isEnabled());
+  const hit = scene.pickWithRay(new Ray(body.position.add(new Vector3(0, 0.12, 0)), Vector3.Down(), 0.22), m => m.checkCollisions && (m.collisionGroup & body.collisionMask) !== 0 && !!m.metadata?.worldId && m.isEnabled());
   state.grounded = !!hit?.hit && state.verticalSpeed <= 0;
   if (state.grounded) state.verticalSpeed = -0.5;
   if (input.jump && state.grounded) { state.verticalSpeed = 7; state.grounded = false; }
@@ -25,6 +25,8 @@ export function stepPlayer(scene: Scene, body: Mesh, state: PlayerState, input: 
   const displacement = direction.scale((state.running ? 7 : 3.2) * dt);
   displacement.y = state.verticalSpeed * dt;
   const previousY = body.position.y;
+  // Multiple fixed steps can run before rendering refreshes the cached world position.
+  body.computeWorldMatrix(true);
   body.moveWithCollisions(displacement);
   if (state.verticalSpeed > 0 && body.position.y - previousY < displacement.y * 0.5) state.verticalSpeed = 0;
   if (state.moving) state.facing = Math.atan2(direction.x, direction.z);

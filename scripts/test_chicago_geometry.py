@@ -1,5 +1,6 @@
 """Run with python3 -m unittest discover -s scripts -p 'test_*.py'."""
 import importlib.util
+import math
 import unittest
 from pathlib import Path
 from shapely.geometry import Polygon, LineString, Point, box
@@ -436,6 +437,9 @@ class StreetGeometryTests(unittest.TestCase):
             self.assertTrue(sidewalk.buffer(1e-7).covers(point.buffer(.2)))
             self.assertFalse(asphalt.intersects(point.buffer(.2)))
             self.assertLessEqual(point.distance(asphalt),1.2+1e-6)
+            # The lamp arm extends along local +X, rotated by Babylon's yaw.
+            tip=Point(x+.4*math.cos(lamp['yaw']),z-.4*math.sin(lamp['yaw']))
+            self.assertLess(tip.distance(asphalt),point.distance(asphalt)-.35)
 
     def test_lamps_skip_roads_without_sidewalk_space(self):
         roads=[dict(bridge=False,width=10,points=[[0,0],[100,0]])]

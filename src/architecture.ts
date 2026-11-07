@@ -7,6 +7,28 @@ import type { ObjectTemplate } from './world';
 export const PROFILES = ['box', 'glass', 'stone', 'deco', 'bundled', 'rounded', 'marina', 'gothic', 'clock', 'tree', 'lamp'] as const;
 export type Profile = typeof PROFILES[number];
 
+export function createCollisionPrototype(scene: Scene): Mesh {
+  // Match the 1.03-wide architectural plinths without changing instance/editor dimensions.
+  const mesh = MeshBuilder.CreateBox('collision-prototype', { width: 1.03, height: 1, depth: 1.03 }, scene);
+  mesh.setEnabled(false);
+  return mesh;
+}
+
+export function attachCollisionGeometry(root: Mesh, source: Mesh): Mesh {
+  // Keep the editor/camera bounds separate from the player's stable, shared collision geometry.
+  root.checkCollisions = true;
+  root.collisionGroup = 2;
+  const collider = source.clone(`${root.name}-collision`, root, true)!;
+  collider.isVisible = false;
+  collider.isPickable = false;
+  collider.checkCollisions = true;
+  collider.collisionGroup = 1;
+  collider.metadata = { ...root.metadata, worldId: root.name, collisionOnly: true };
+  collider.setEnabled(true);
+  collider.computeWorldMatrix(true);
+  return collider;
+}
+
 // Local geometry is normalized to the editable collision box. Materials and geometry are shared by instances.
 export function buildArchitecture(template: ObjectTemplate, scene: Scene, material: Material, detailMaterial: Material): Mesh[] {
   const profile = template.profile ?? 'box';
