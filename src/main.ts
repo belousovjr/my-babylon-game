@@ -57,7 +57,7 @@ light.intensity = 1.05;
 light.groundColor = Color3.FromHexString('#56616b');
 const camera = new ArcRotateCamera('follow', -Math.PI / 2, 1.22, 9, new Vector3(32, 1, 22), scene);
 camera.lowerRadiusLimit = MIN_CAMERA_DISTANCE; camera.upperRadiusLimit = 16;
-camera.lowerBetaLimit = 0.25; camera.upperBetaLimit = 1.48;
+camera.lowerBetaLimit = 0.25; camera.upperBetaLimit = Math.PI / 2 + Math.PI / 10;
 camera.wheelPrecision = 35; camera.panningSensibility = 0;
 camera.checkCollisions = false;
 camera.minZ = 0.1; camera.maxZ = 240;

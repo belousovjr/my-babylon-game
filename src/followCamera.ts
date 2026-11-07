@@ -90,18 +90,25 @@ export class FollowCamera {
     // Test the requested pose, so pulling forward does not clear its own condition and oscillate.
     const occluded = fullOcclusion(target, desired, blockers);
     const predictedOccluded = occluded.size > 0 && fullOcclusion(predictedTarget, desired.add(lookAhead), blockers).size > 0;
-    let safe = wanted, predictedSafe = wanted;
-    if (occluded.size > 0) for (const mesh of blockers) {
+    let safe = wanted, predictedSafe = wanted, groundSafe = Infinity;
+    for (const mesh of blockers) {
+      const ground = mesh.metadata?.kind === 'ground';
+      if (!ground && occluded.size === 0) continue;
       const hit = boxEntry(target, arm, wanted, mesh, CAMERA_RADIUS);
-      if (hit !== null) safe = Math.min(safe, Math.max(0.02, hit - SKIN));
+      if (hit !== null) {
+        const distance = Math.max(0.02, hit - SKIN);
+        safe = Math.min(safe, distance);
+        if (ground) groundSafe = Math.min(groundSafe, distance);
+      }
       const predictedHit = boxEntry(predictedTarget, arm, wanted, mesh, CAMERA_RADIUS);
-      if (predictedOccluded && predictedHit !== null) predictedSafe = Math.min(predictedSafe, Math.max(0.02, predictedHit - SKIN));
+      if ((ground || predictedOccluded) && predictedHit !== null) predictedSafe = Math.min(predictedSafe, Math.max(0.02, predictedHit - SKIN));
     }
     const goal = Math.min(safe, predictedSafe);
     const previous = this.distance ?? wanted;
     const response = goal < previous ? 18 : 4;
     // Keep the avatar readable in tight spaces; faded obstacles may intersect the minimum-distance camera.
-    this.distance = Math.max(MIN_CAMERA_DISTANCE, Math.min(safe, wanted, previous + (goal - previous) * (1 - Math.exp(-response * dt))));
+    // Opaque ground takes priority over the minimum distance: never push the camera under the floor.
+    this.distance = Math.min(groundSafe, Math.max(MIN_CAMERA_DISTANCE, Math.min(safe, wanted, previous + (goal - previous) * (1 - Math.exp(-response * dt)))));
     this.position.copyFrom(target).addInPlace(arm.scale(this.distance));
     for (const mesh of occluded) {
       if (mesh.metadata?.kind !== 'ground' && !this.faded.has(mesh)) this.faded.set(mesh, mesh.visibility);

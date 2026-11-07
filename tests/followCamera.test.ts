@@ -96,3 +96,27 @@ test('minimum camera distance survives close walls, prediction, zoom and resets'
   assert.ok(boom.position.subtract(target).length()>8.99,'normal zoom recovers');
   scene.dispose();engine.dispose();
 });
+
+test('low-angle camera retracts above opaque ground and restores zoom in the air', () => {
+  const engine=new NullEngine(),scene=new Scene(engine);
+  const ground=MeshBuilder.CreateBox('ground',{width:100,height:1,depth:100},scene);
+  ground.position.y=-0.5;ground.checkCollisions=true;ground.metadata={kind:'ground'};
+  const boom=new FollowCamera(),target=new Vector3(0,1.15,0);
+  const arm=new Vector3(0,-Math.sin(Math.PI/10),Math.cos(Math.PI/10));
+  const desired=target.add(arm.scale(9));
+  for(let i=0;i<30;i++)boom.update(target,desired,[ground],1/60);
+  assert.ok(boom.position.y>=0.3,'camera volume stays above ground');
+  assert.ok(boom.position.y<target.y,'can look up at avatar');
+  assert.ok(boom.position.subtract(target).length()<9,'floor retracts camera');
+  assert.equal(ground.visibility,1);
+  // Raised floor can leave less space than the usual 2.5 m minimum.
+  ground.position.y=0.1;
+  boom.update(target,desired,[ground],1/60);
+  assert.ok(boom.position.y>=0.9,'raised floor wins over minimum radius');
+  assert.ok(boom.position.subtract(target).length()<MIN_CAMERA_DISTANCE);
+  const airTarget=new Vector3(0,8,0),airDesired=airTarget.add(arm.scale(9));
+  for(let i=0;i<180;i++)boom.update(airTarget,airDesired,[ground],1/60);
+  assert.ok(boom.position.subtract(airTarget).length()>8.99,'recovers full zoom above floor');
+  assert.equal(ground.visibility,1);
+  scene.dispose();engine.dispose();
+});
