@@ -110,7 +110,7 @@ export class FollowCamera {
     const response = goal < previous ? 18 : 4;
     // Keep the avatar readable in tight spaces; faded obstacles may intersect the minimum-distance camera.
     // Opaque ground takes priority over the minimum distance: never push the camera under the floor.
-    this.distance = Math.min(groundSafe, Math.max(MIN_CAMERA_DISTANCE, Math.min(safe, wanted, previous + (goal - previous) * (1 - Math.exp(-response * dt)))));
+    this.distance = Math.min(groundSafe, Math.max(MIN_CAMERA_DISTANCE, Math.min(wanted, previous + (goal - previous) * (1 - Math.exp(-response * dt)))));
     this.position.copyFrom(target).addInPlace(arm.scale(this.distance));
     for (const mesh of fadedBlockers) {
       if (mesh.metadata?.kind !== 'ground' && !this.faded.has(mesh)) this.faded.set(mesh, mesh.visibility);

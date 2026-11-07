@@ -30,7 +30,7 @@ test('boom retracts safely, predicts lateral movement, restores zoom and opacity
   const mat=new StandardMaterial('shared',scene);wall.material=mat;other.material=mat;
   const boom=new FollowCamera(),target=new Vector3(0,1,0),desired=new Vector3(0,1,9);
   boom.update(target,desired,[wall],1/60);
-  assert.ok(boom.position.z<3.66,'immediate safe retraction through thin wall');
+  assert.ok(boom.position.z>3.66 && boom.position.z<9,'unexpected wall starts a smooth retraction');
   for(let i=0;i<20;i++)boom.update(target,desired,[wall],1/60);
   assert.ok(wall.visibility<0.3);assert.equal(other.visibility,1);assert.equal(mat.alpha,1);
   wall.setEnabled(false);boom.update(target,desired,[wall],1/60);
@@ -132,5 +132,32 @@ test('four or more covered samples fade blockers without retracting camera', () 
   wall.scaling.y=0.2;
   boom.update(target,desired,[wall],1/60);
   assert.equal(wall.visibility,1,'below threshold restores opacity');
+  scene.dispose();engine.dispose();
+});
+
+test('unexpected occlusion retracts continuously with frame-rate independent damping', () => {
+  const engine=new NullEngine(),scene=new Scene(engine);
+  const wall=MeshBuilder.CreateBox('wall',{width:4,height:4,depth:0.1},scene);
+  wall.position.set(0,1,4);wall.checkCollisions=true;wall.metadata={kind:'building'};
+  const target=new Vector3(0,1.15,0),desired=new Vector3(0,1.15,9);
+  const boom=new FollowCamera();
+  boom.update(target,desired,[],1/60);
+  boom.update(target,desired,[wall],0);
+  assert.equal(boom.position.z,9,'no instantaneous collision snap');
+  let previous=9;
+  for(let i=0;i<30;i++) {
+    boom.update(target,desired,[wall],1/60);
+    assert.ok(boom.position.z<previous,'approaches obstacle monotonically');
+    assert.ok(boom.position.z>3.6,'does not overshoot');
+    previous=boom.position.z;
+  }
+  assert.ok(boom.position.z<3.62,'settles quickly');
+  const distances=[];
+  for(const dt of [1/30,1/60,1/120]) {
+    boom.reset();boom.update(target,desired,[],0);
+    for(let i=0;i<Math.round(0.2/dt);i++)boom.update(target,desired,[wall],dt);
+    distances.push(boom.position.z);
+  }
+  assert.ok(Math.max(...distances)-Math.min(...distances)<1e-8);
   scene.dispose();engine.dispose();
 });
