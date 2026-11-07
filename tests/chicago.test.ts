@@ -8,7 +8,7 @@ import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
 import { Ray } from '@babylonjs/core/Culling/ray.js';
 import { createWorld, parseWorld } from '../src/world.ts';
 import { buildArchitecture, createCollisionPrototype } from '../src/architecture.ts';
-import { drawChicagoStreets } from '../src/streets.ts';
+import { drawChicagoStreets, updateStreetDetailLODs } from '../src/streets.ts';
 import { boxEntry } from '../src/followCamera.ts';
 import data from '../src/generated/chicago.json' with { type: 'json' };
 
@@ -189,5 +189,44 @@ test('multi-direction traffic signal heads are rendered on one shared pole', () 
     assert.ok(front,'both perpendicular head faces have geometry');
   }
   assert.ok(levels.every(level=>level.subMeshes.length<=2),'heads stay batched with their pole');
+  scene.dispose();engine.dispose();
+});
+
+
+test('street details simplify then disappear without disabling collision geometry', () => {
+  const engine=new NullEngine(),scene=new Scene(engine),mat=new StandardMaterial('surface',scene);
+  const {meshes}=drawChicagoStreets(scene,()=>mat);
+  for(const layer of ['marking','rail-structure']) {
+    const near=meshes.filter(m=>m.metadata.detailLayer===layer&&m.metadata.detailLevel===0);
+    const far=meshes.filter(m=>m.metadata.detailLayer===layer&&m.metadata.detailLevel===1);
+    assert.ok(near.length>0&&far.length>0);
+    assert.ok(far.reduce((n,m)=>n+m.getTotalIndices(),0)<near.reduce((n,m)=>n+m.getTotalIndices(),0),'distant geometry has fewer triangles');
+    const representative=far.find(m=>m.metadata.lodBounds)!;
+    const bounds=representative.metadata.lodBounds;
+    updateStreetDetailLODs(meshes,bounds.centerWorld);
+    assert.equal(representative.isVisible,false);
+    const threshold=layer==='marking'?60:100;
+    const eye=new Vector3(bounds.maximumWorld.x+threshold+10,bounds.centerWorld.y,bounds.centerWorld.z);
+    updateStreetDetailLODs(meshes,eye);
+    assert.equal(representative.isVisible,true,'simplified version appears at middle distance');
+  }
+  updateStreetDetailLODs(meshes,new Vector3(10000,10000,10000));
+  for(const mesh of meshes.filter(m=>m.metadata.detailLayer!=='world')) {
+    assert.equal(mesh.isVisible,false,'distant detail disappears');
+    assert.equal(mesh.isEnabled(),true,'render culling does not disable collision meshes');
+    if(mesh.metadata.detailLevel===1) assert.equal(mesh.checkCollisions,false,'low LOD does not add duplicate colliders');
+  }
+  assert.ok(meshes.some(m=>m.checkCollisions&&m.metadata.detailLayer==='rail-structure'));
+  scene.dispose();engine.dispose();
+});
+
+test('lamp and traffic signal LODs reduce triangles while retaining their silhouette', () => {
+  const engine=new NullEngine(),scene=new Scene(engine),mat=new StandardMaterial('surface',scene);
+  for(const profile of ['lamp','traffic_signal']) {
+    const template=createWorld().templates.find(t=>t.profile===profile)!;
+    const levels=buildArchitecture(template,scene,mat,mat);
+    assert.ok(levels[1].getTotalIndices()<levels[0].getTotalIndices(),profile+' must actually simplify');
+    assert.equal(levels[0].getBoundingInfo().boundingBox.minimum.y,levels[1].getBoundingInfo().boundingBox.minimum.y);
+  }
   scene.dispose();engine.dispose();
 });

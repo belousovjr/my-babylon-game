@@ -180,3 +180,15 @@ searching, so narrow corners do not fail merely because the nearest point was to
 close to traffic. Incoming arms not covered by a primary head receive additional
 heads on an existing pole. Relative head angles snap to 15 degrees so geometry
 remains shared; head-facing tests allow only small angular error.
+
+
+Small street details have a full and a simplified render LOD, updated on the
+existing 0.15 s LOD tick. Markings use full geometry below 60 m, flat dashes and
+two crossing-edge lines from 60–160 m, then disappear. Railway frames/trusses
+simplify at 100 m (no knee/diagonal braces or foot blocks) and disappear beyond
+320 m. Detail batches use 128 m cells; terrain/decks keep 256 m batches. LOD
+distances use the nearest point of the shared full-detail bounds, so a batch's
+two versions cannot appear together. Render visibility does not disable collision
+geometry. Lamps simplify their poles and disappear at 120 m; signal heads omit
+inactive lenses at low LOD and disappear at 160 m. Selected editable objects
+remain visible for manual LOD preview.

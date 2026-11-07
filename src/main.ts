@@ -21,7 +21,7 @@ import { FollowCamera, MIN_CAMERA_DISTANCE } from './followCamera';
 import { attachCollisionGeometry, buildArchitecture, createCollisionPrototype, PROFILES } from './architecture';
 import type { Profile } from './architecture';
 import type { InstancedMesh } from '@babylonjs/core/Meshes/instancedMesh.js';
-import { drawChicagoStreets } from './streets';
+import { drawChicagoStreets, updateStreetDetailLODs } from './streets';
 import { AnimationBlend } from './animationBlend';
 import './style.css';
 
@@ -195,9 +195,11 @@ function updateLODs() {
     const bounds = root.getBoundingInfo().boundingBox;
     const distance = Vector3.Distance(eye, Vector3.Clamp(eye, bounds.minimumWorld, bounds.maximumWorld));
     const level = editing && root === selected && previewLod >= 0 ? Math.min(previewLod, levels.length - 1) : (template.lodDistances ?? []).filter(d => distance >= d).length;
-    levels.forEach((mesh, i) => { mesh.setEnabled(i === level && (root.metadata.kind === 'building' || distance < 240)); mesh.visibility = root.visibility; });
+    const range = template.profile === 'lamp' ? 120 : template.profile === 'traffic_signal' ? 160 : 240;
+    levels.forEach((mesh, i) => { mesh.setEnabled(i === level && (root.metadata.kind === 'building' || distance < range || (editing && root === selected))); mesh.visibility = root.visibility; });
     root.metadata.lod = level;
   }
+  updateStreetDetailLODs(proceduralMeshes, eye);
 }
 
 function rebuild() {

@@ -86,13 +86,14 @@ export function buildArchitecture(template: ObjectTemplate, scene: Scene, materi
         const housing = part(Math.sin(angle) * 0.2, 0.20, Math.cos(angle) * 0.2, 0.58, 0.25, 0.28, 0.12);
         housing.rotation.y = angle;
         for (const [i, color] of [[1, 0.04, 0.02], [0.12, 0.09, 0.01], [0.01, 0.09, 0.03]].entries()) {
+          if (detail > 0 && i > 0) continue;
           const lens = part(Math.sin(angle) * 0.355, 0.275 - i * 0.075, Math.cos(angle) * 0.355, 0.32, 0.045, 0.035, 1);
           lens.rotation.y = angle;
           lens.setVerticesData('color', Array.from({ length: lens.getTotalVertices() }, () => [...color, 1]).flat());
         }
       }
     } else if (profile === 'lamp') {
-      part(0, -0.03, 0, 0.13, 0.94, 0.13, 0.8, true);
+      part(0, -0.03, 0, 0.13, 0.94, 0.13, 0.8, detail === 0);
       part(0.23, 0.43, 0, 0.55, 0.04, 0.08, 1.2);
       if (detail === 0) part(0.45, 0.4, 0, 0.25, 0.05, 0.25, 2);
     } else {

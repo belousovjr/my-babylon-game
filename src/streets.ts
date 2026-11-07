@@ -13,14 +13,28 @@ export function elevationAt(_x: number, _z: number, surface: 'street' | 'sidewal
   return { street: 0, sidewalk: 0.16, water: -5.5, riverwalk: -3.8 }[surface];
 }
 
+// Visibility never disables the near mesh: its collision geometry remains available.
+export function updateStreetDetailLODs(meshes: Mesh[], eye: Vector3) {
+  for (const mesh of meshes) {
+    const layer = mesh.metadata?.detailLayer;
+    if (!layer || layer === 'world') continue;
+    const bounds = mesh.metadata.lodBounds ?? mesh.getBoundingInfo().boundingBox;
+    const distance = Vector3.Distance(eye, Vector3.Clamp(eye, bounds.minimumWorld, bounds.maximumWorld));
+    const near = layer === 'marking' ? 60 : 100, far = layer === 'marking' ? 160 : 320;
+    mesh.isVisible = distance < far && (mesh.metadata.detailLevel === 0 ? distance < near : distance >= near);
+  }
+}
+
 // Procedural surfaces are batched by 256 m cell and material, not editable world-object records.
 export function drawChicagoStreets(scene: Scene, material: (color: string) => Material) {
-  const batches = new Map<string, { positions: number[]; indices: number[]; color: string; collision: boolean }>();
+  const batches = new Map<string, { positions: number[]; indices: number[]; color: string; collision: boolean; layer: string; level: number }>();
   const props: StreetFurniture[] = [];
   const cube = VertexData.CreateBox({ size: 1 });
+  let detailLayer = 'world', detailLevel = 0;
   function batch(x: number, z: number, color: string, collision: boolean) {
-    const key = `${Math.floor(x / 256)},${Math.floor(z / 256)},${color},${collision}`;
-    if (!batches.has(key)) batches.set(key, { positions: [], indices: [], color, collision });
+    const cell = detailLayer === 'world' ? 256 : 128;
+    const key = `${Math.floor(x / cell)},${Math.floor(z / cell)},${color},${collision},${detailLayer},${detailLevel}`;
+    if (!batches.has(key)) batches.set(key, { positions: [], indices: [], color, collision, layer: detailLayer, level: detailLevel });
     return batches.get(key)!;
   }
   function box(x: number, y: number, z: number, w: number, h: number, d: number, yaw: number, color: string, collision = true, roll = 0) {
@@ -43,6 +57,12 @@ export function drawChicagoStreets(scene: Scene, material: (color: string) => Ma
       for (const p of points) b.positions.push(p[0]!, y, p[1]!);
       b.indices.push(offset, offset + 1, offset + 2);
     }
+  }
+  function paintRectangle(x: number, z: number, width: number, depth: number, yaw: number) {
+    const cos = Math.cos(yaw), sin = Math.sin(yaw);
+    const p = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) =>
+      [x + a! * width / 2 * cos + b! * depth / 2 * sin, z - a! * width / 2 * sin + b! * depth / 2 * cos]);
+    surface([[p[0]!, p[1]!, p[2]!], [p[0]!, p[2]!, p[3]!]], 0.055, '#c3baa1', false);
   }
   function walls(lines: number[][][], bottom: number, top: number, color: string) {
     for (const line of lines) for (let i = 1; i < line.length; i++) {
@@ -70,35 +90,45 @@ export function drawChicagoStreets(scene: Scene, material: (color: string) => Ma
   surface(data.sidewalks, elevationAt(0, 0, 'sidewalk'), '#b6b2a4', true);
   surface(data.curbs, 0.18, '#c0bba9', true);
   for (const edge of data.pavingEdges) walls(edge.lines, 0, edge.top, edge.color);
-  for (const crossing of data.crosswalks) {
-    surface(crossing.stripes, 0.055, '#c3baa1', false);
-    surface(crossing.stopLine, 0.055, '#c3baa1', false);
-  }
-  for (const road of data.roads) {
-    for (let i = 1; i < road.points.length; i++) {
-      const a = road.points[i - 1]!, b = road.points[i]!;
-      const dx = b[0]! - a[0]!, dz = b[1]! - a[1]!, length = Math.hypot(dx, dz);
-      if (length < 1) continue;
-      const yaw = -Math.atan2(dz, dx);
-      const nx = -dz / length, nz = dx / length;
-      for (let distance = 9; distance < length - 10; distance += 16) {
-        const t = distance / length;
-        const x = a[0]! + dx * t, z = a[1]! + dz * t;
-        if (data.crosswalks.some(crossing => {
-          const rx = x - crossing.centre[0]!, rz = z - crossing.centre[1]!;
-          const [ux, uz] = crossing.direction;
-          return Math.abs(rx * ux! + rz * uz!) < crossing.depth / 2 + 4
-            && Math.abs(-rx * uz! + rz * ux!) < crossing.width / 2 + 2.1;
-        })) continue;
-        box(x, 0.055, z, 4, 0.01, 0.16, yaw, '#c3baa1', false);
+  detailLayer = 'marking';
+  for (detailLevel of [0, 1]) {
+    for (const crossing of data.crosswalks) {
+      if (detailLevel === 0) surface(crossing.stripes, 0.055, '#c3baa1', false);
+      else {
+        const [cx, cz] = crossing.centre, [ux, uz] = crossing.direction;
+        for (const side of [-1, 1]) paintRectangle(cx! + ux! * side * (crossing.depth / 2 - 0.08), cz! + uz! * side * (crossing.depth / 2 - 0.08),
+          crossing.width - 0.2, 0.16, -Math.atan2(ux!, -uz!));
       }
-      if (!road.bridge && length > 45) for (let distance = 25; distance < length - 20; distance += 85) {
-        const side = road.width / 2 + 2.2, t = distance / length;
-        if (data.trafficSignals.some(signal => Math.hypot(signal.position[0]! - (a[0]! + dx * t - nx * side), signal.position[2]! - (a[1]! + dz * t - nz * side)) < 2)) continue;
-        props.push({ templateId: 'tree', position: [a[0]! + dx * t - nx * side, 0, a[1]! + dz * t - nz * side], yaw: 0 });
+      surface(crossing.stopLine, 0.055, '#c3baa1', false);
+    }
+    for (const road of data.roads) {
+      for (let i = 1; i < road.points.length; i++) {
+        const a = road.points[i - 1]!, b = road.points[i]!;
+        const dx = b[0]! - a[0]!, dz = b[1]! - a[1]!, length = Math.hypot(dx, dz);
+        if (length < 1) continue;
+        const yaw = -Math.atan2(dz, dx);
+        const nx = -dz / length, nz = dx / length;
+        for (let distance = 9; distance < length - 10; distance += 16) {
+          const t = distance / length;
+          const x = a[0]! + dx * t, z = a[1]! + dz * t;
+          if (data.crosswalks.some(crossing => {
+            const rx = x - crossing.centre[0]!, rz = z - crossing.centre[1]!;
+            const [ux, uz] = crossing.direction;
+            return Math.abs(rx * ux! + rz * uz!) < crossing.depth / 2 + 4
+              && Math.abs(-rx * uz! + rz * ux!) < crossing.width / 2 + 2.1;
+          })) continue;
+          if (detailLevel === 0) box(x, 0.055, z, 4, 0.01, 0.16, yaw, '#c3baa1', false);
+          else paintRectangle(x, z, 4, 0.16, yaw);
+        }
+        if (detailLevel === 0 && !road.bridge && length > 45) for (let distance = 25; distance < length - 20; distance += 85) {
+          const side = road.width / 2 + 2.2, t = distance / length;
+          if (data.trafficSignals.some(signal => Math.hypot(signal.position[0]! - (a[0]! + dx * t - nx * side), signal.position[2]! - (a[1]! + dz * t - nz * side)) < 2)) continue;
+          props.push({ templateId: 'tree', position: [a[0]! + dx * t - nx * side, 0, a[1]! + dz * t - nz * side], yaw: 0 });
+        }
       }
     }
   }
+  detailLayer = 'world'; detailLevel = 0;
   function drawElevatedRailway() {
     const railway = data.railway;
     surface(railway.deck, 6, '#505b55', true);
@@ -106,48 +136,55 @@ export function drawChicagoStreets(scene: Scene, material: (color: string) => Ma
     walls(railway.edges, 5.65, 6, '#505b55');
     surface(railway.rails, 6.16, '#959b92', false);
     walls(railway.railEdges, 6, 6.16, '#959b92');
-    for (const truss of railway.bridgeTrusses) {
-      const color = '#655044', bottom = truss.bankSupported ? 0.15 : 0.18, top = 5.5;
-      for (const side of truss.sides) {
-        const [a, b] = side, dx = b![0]! - a![0]!, dz = b![1]! - a![1]!;
-        const length = Math.hypot(dx, dz), yaw = -Math.atan2(dz, dx);
-        for (const y of [bottom, top]) box((a![0]! + b![0]!) / 2, y, (a![1]! + b![1]!) / 2, length + 0.3, 0.3, 0.3, yaw, color);
-        for (let j = 0; j <= truss.panels; j++) {
-          const t = j / truss.panels;
-          box(a![0]! + dx * t, (bottom + top) / 2, a![1]! + dz * t, 0.3, top - bottom, 0.3, yaw, color);
-          if (j < truss.panels) {
-            const rise = (j % 2 === 0 ? 1 : -1) * (top - bottom), run = length / truss.panels;
-            box(a![0]! + dx * (j + 0.5) / truss.panels, (bottom + top) / 2, a![1]! + dz * (j + 0.5) / truss.panels,
-              Math.hypot(run, rise), 0.22, 0.22, yaw, color, true, Math.atan2(rise, run));
+    detailLayer = 'rail-structure';
+    for (detailLevel of [0, 1]) {
+      for (const truss of railway.bridgeTrusses) {
+        const color = '#655044', bottom = truss.bankSupported ? 0.15 : 0.18, top = 5.5;
+        for (const side of truss.sides) {
+          const [a, b] = side, dx = b![0]! - a![0]!, dz = b![1]! - a![1]!;
+          const length = Math.hypot(dx, dz), yaw = -Math.atan2(dz, dx);
+          for (const y of [bottom, top]) box((a![0]! + b![0]!) / 2, y, (a![1]! + b![1]!) / 2, length + 0.3, 0.3, 0.3, yaw, color);
+          for (let j = 0; j <= truss.panels; j++) {
+            if (detailLevel === 1 && j !== 0 && j !== truss.panels) continue;
+            const t = j / truss.panels;
+            box(a![0]! + dx * t, (bottom + top) / 2, a![1]! + dz * t, 0.3, top - bottom, 0.3, yaw, color);
+            if (detailLevel === 0 && j < truss.panels) {
+              const rise = (j % 2 === 0 ? 1 : -1) * (top - bottom), run = length / truss.panels;
+              box(a![0]! + dx * (j + 0.5) / truss.panels, (bottom + top) / 2, a![1]! + dz * (j + 0.5) / truss.panels,
+                Math.hypot(run, rise), 0.22, 0.22, yaw, color, true, Math.atan2(rise, run));
+            }
           }
         }
+        for (let j = 0; j <= truss.panels; j++) {
+          if (detailLevel === 1 && j !== 0 && j !== truss.panels) continue;
+          const t = j / truss.panels;
+          const [a, b] = truss.sides.map(side => [side[0]![0]! + (side[1]![0]! - side[0]![0]!) * t, side[0]![1]! + (side[1]![1]! - side[0]![1]!) * t]);
+          const dx = b![0]! - a![0]!, dz = b![1]! - a![1]!;
+          box((a![0]! + b![0]!) / 2, top, (a![1]! + b![1]!) / 2, Math.hypot(dx, dz), 0.3, 0.3, -Math.atan2(dz, dx), color);
+        }
       }
-      for (let j = 0; j <= truss.panels; j++) {
-        const t = j / truss.panels;
-        const [a, b] = truss.sides.map(side => [side[0]![0]! + (side[1]![0]! - side[0]![0]!) * t, side[0]![1]! + (side[1]![1]! - side[0]![1]!) * t]);
-        const dx = b![0]! - a![0]!, dz = b![1]! - a![1]!;
-        box((a![0]! + b![0]!) / 2, top, (a![1]! + b![1]!) / 2, Math.hypot(dx, dz), 0.3, 0.3, -Math.atan2(dz, dx), color);
+      for (let i = 0; i < railway.supports.length; i += 2) {
+        const pair = railway.supports.slice(i, i + 2);
+        const [a, b] = pair.map(s => s.position);
+        const dx = b![0]! - a![0]!, dz = b![2]! - a![2]!, span = Math.hypot(dx, dz);
+        const ux = dx / span, uz = dz / span, yaw = -Math.atan2(dz, dx);
+        const ends = [...pair.map(s => s.position), ...pair.map(s => [s.attachment[0]!, 0, s.attachment[1]!])];
+        const projections = ends.map(p => (p[0]! - a![0]!) * ux + (p[2]! - a![2]!) * uz);
+        const left = Math.min(...projections) - 0.25, right = Math.max(...projections) + 0.25, middle = (left + right) / 2;
+        box(a![0]! + ux * middle, 5.45, a![2]! + uz * middle, right - left, 0.4, 0.5, yaw, '#505b55');
+        for (const [j, support] of pair.entries()) {
+          const [x, base, z] = support.position, height = support.top - base!;
+          box(x!, base! + height / 2, z!, 0.35, height, 0.35, yaw, '#505b55');
+          if (detailLevel === 1) continue;
+          box(x!, base! + 0.15, z!, 0.65, 0.3, 0.65, yaw, '#868b83');
+          const reach = Math.min(1.25, span / 4), sign = j === 0 ? 1 : -1;
+          const braceX = ux * reach * sign, braceZ = uz * reach * sign;
+          box(x! + braceX / 2, 4.9, z! + braceZ / 2, Math.hypot(reach, 1.1), 0.18, 0.18,
+            -Math.atan2(braceZ, braceX), '#505b55', true, Math.atan2(1.1, reach));
+        }
       }
     }
-    for (let i = 0; i < railway.supports.length; i += 2) {
-      const pair = railway.supports.slice(i, i + 2);
-      const [a, b] = pair.map(s => s.position);
-      const dx = b![0]! - a![0]!, dz = b![2]! - a![2]!, span = Math.hypot(dx, dz);
-      const ux = dx / span, uz = dz / span, yaw = -Math.atan2(dz, dx);
-      const ends = [...pair.map(s => s.position), ...pair.map(s => [s.attachment[0]!, 0, s.attachment[1]!])];
-      const projections = ends.map(p => (p[0]! - a![0]!) * ux + (p[2]! - a![2]!) * uz);
-      const left = Math.min(...projections) - 0.25, right = Math.max(...projections) + 0.25, middle = (left + right) / 2;
-      box(a![0]! + ux * middle, 5.45, a![2]! + uz * middle, right - left, 0.4, 0.5, yaw, '#505b55');
-      for (const [j, support] of pair.entries()) {
-        const [x, base, z] = support.position, height = support.top - base!;
-        box(x!, base! + height / 2, z!, 0.35, height, 0.35, yaw, '#505b55');
-        box(x!, base! + 0.15, z!, 0.65, 0.3, 0.65, yaw, '#868b83');
-        const reach = Math.min(1.25, span / 4), sign = j === 0 ? 1 : -1;
-        const braceX = ux * reach * sign, braceZ = uz * reach * sign;
-        box(x! + braceX / 2, 4.9, z! + braceZ / 2, Math.hypot(reach, 1.1), 0.18, 0.18,
-          -Math.atan2(braceZ, braceX), '#505b55', true, Math.atan2(1.1, reach));
-      }
-    }
+    detailLayer = 'world'; detailLevel = 0;
   }
   drawElevatedRailway();
   walls(data.shorelines, -5.5, -3.8, '#868b83');
@@ -167,13 +204,18 @@ export function drawChicagoStreets(scene: Scene, material: (color: string) => Ma
     b.indices.push(offset, offset + 1, offset + 2, offset + 1, offset + 3, offset + 2);
   }
   const meshes: Mesh[] = [];
+  const fullBatches = new Map<string, Mesh>();
   for (const [key, b] of batches) {
     const mesh = new Mesh(`street-${key}`, scene), vertexData = new VertexData();
     vertexData.positions = b.positions; vertexData.indices = b.indices;
     const normals: number[] = []; VertexData.ComputeNormals(b.positions, b.indices, normals); vertexData.normals = normals;
-    vertexData.applyToMesh(mesh); mesh.material = material(b.color); mesh.checkCollisions = b.collision;
-    mesh.isPickable = b.collision; mesh.metadata = { worldId: mesh.name, kind: 'ground', procedural: true };
+    vertexData.applyToMesh(mesh); mesh.material = material(b.color); mesh.checkCollisions = b.collision && b.level === 0;
+    mesh.isPickable = mesh.checkCollisions; mesh.metadata = { worldId: mesh.name, kind: 'ground', procedural: true, detailLayer: b.layer, detailLevel: b.level };
+    mesh.isVisible = b.level === 0;
     mesh.freezeWorldMatrix(); meshes.push(mesh);
+    const lodKey = key.slice(0, key.lastIndexOf(','));
+    if (b.level === 0) fullBatches.set(lodKey, mesh);
+    else mesh.metadata.lodBounds = fullBatches.get(lodKey)?.getBoundingInfo().boundingBox;
   }
   const groundRay = new Ray(Vector3.Zero(), Vector3.Down(), 7);
   for (const prop of props) {
