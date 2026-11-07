@@ -57,6 +57,7 @@ export function drawChicagoStreets(scene: Scene, material: (color: string) => Ma
     }
   }
   const data = chicago.environment;
+  props.push(...data.lamps.map(lamp => ({ templateId: 'lamp' as const, position: [...lamp.position] as [number, number, number], yaw: lamp.yaw })));
   function drawTerrain() {
   for (const cell of data.terrain) surface(cell.triangles, elevationAt(0, 0), '#85877d', true);
   surface(data.water, elevationAt(0, 0, 'water'), '#517d85', false);
@@ -81,7 +82,6 @@ export function drawChicagoStreets(scene: Scene, material: (color: string) => Ma
       }
       if (!road.bridge && length > 45) for (let distance = 25; distance < length - 20; distance += 85) {
         const side = road.width / 2 + 2.2, t = distance / length;
-        props.push({ templateId: 'lamp', position: [a[0]! + dx * t + nx * side, 0, a[1]! + dz * t + nz * side], yaw });
         props.push({ templateId: 'tree', position: [a[0]! + dx * t - nx * side, 0, a[1]! + dz * t - nz * side], yaw: 0 });
       }
     }

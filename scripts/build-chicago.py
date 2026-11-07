@@ -150,6 +150,25 @@ def railway_bridge_trusses(deck,pavement,water,banks):
         result.append(dict(sides=sides,bankSupported=bank_supported,panels=max(2,min(8,math.ceil((distances[1]-distances[0])/12)))))
     return result
 
+def street_lamps(roads,sidewalks,asphalt):
+    safe=sidewalks.buffer(-.25)
+    if safe.is_empty:return []
+    lamps=[]
+    for road in roads:
+        if road['bridge']:continue
+        for a,b in zip(road['points'],road['points'][1:]):
+            dx,dz=b[0]-a[0],b[1]-a[1];length=math.hypot(dx,dz)
+            if length<=45:continue
+            nx,nz=-dz/length,dx/length
+            for distance in range(25,int(length-20),85):
+                side=road['width']/2+.6
+                desired=Point(a[0]+dx*distance/length+nx*side,a[1]+dz*distance/length+nz*side)
+                point=nearest_points(desired,safe)[1]
+                if desired.distance(point)>4 or point.distance(asphalt)>1.2:continue
+                if any(point.distance(Point(lamp['position'][0],lamp['position'][2]))<8 for lamp in lamps):continue
+                lamps.append(dict(templateId='lamp',position=[point.x,.16,point.y],yaw=-math.atan2(dz,dx)))
+    return lamps
+
 def railway_support_candidates(points,sidewalks,asphalt,lowered_banks,deck,ground):
     allowed=sidewalks.buffer(-.5).union(ground.buffer(-.5)).difference(lowered_banks.buffer(.5))
     if allowed.is_empty:return []
@@ -429,7 +448,7 @@ def main():
         nx,nz=-dz/length,dx/length
         if water.contains(Point(mx+nx*2,mz+nz*2)):nx,nz=-nx,-nz
         ramps.append({'top':[rounded(mx+nx*8),0.17,rounded(mz+nz*8)],'bottom':[rounded(mx+dx/length*32+nx*3),-3.78,rounded(mz+dz/length*32+nz*3)]})
-    env=dict(railway=railway,roadSurface=triangles(road_union),sidewalks=triangles(sidewalks),curbs=triangles(curbs),pavingEdges=paving_edges,terraceWalls=terrace_lines,ramps=ramps,origin=[LON,LAT],bounds=list(map(rounded,bounds.bounds)),roads=roads,terrain=terrain,water=triangles(water),riverwalk=triangles(riverwalk),parks=[tri for p in parks for tri in triangles(p.intersection(exposed_ground))],shorelines=rings(water),bridgeDeck=triangles(bridge),bridgeEdges=rings(bridge),bridgeAbutments=rings(abutments),bridgeRails=[[[float(x),float(z)] for x,z in line.coords] for line in rail_lines if line.geom_type=='LineString' and line.length>1])
+    env=dict(lamps=street_lamps(roads,sidewalks,road_union),railway=railway,roadSurface=triangles(road_union),sidewalks=triangles(sidewalks),curbs=triangles(curbs),pavingEdges=paving_edges,terraceWalls=terrace_lines,ramps=ramps,origin=[LON,LAT],bounds=list(map(rounded,bounds.bounds)),roads=roads,terrain=terrain,water=triangles(water),riverwalk=triangles(riverwalk),parks=[tri for p in parks for tri in triangles(p.intersection(exposed_ground))],shorelines=rings(water),bridgeDeck=triangles(bridge),bridgeEdges=rings(bridge),bridgeAbutments=rings(abutments),bridgeRails=[[[float(x),float(z)] for x,z in line.coords] for line in rail_lines if line.geom_type=='LineString' and line.length>1])
     output=dict(world=world,environment=env,report=dict(buildings=len(objects),protectedBuildings=protected_ids,fittedBuildings=fitted_count,omittedBuildings=skipped_count,roads=len(roads),families=dict(families),heights=dict(heights),bounds=BBOX,origin=[LON,LAT],licence='ODbL-1.0',attribution='© OpenStreetMap contributors',waterArea=rounded(water.area)))
     assert len({o['id'] for o in objects})==len(objects), 'Duplicate OSM building IDs'
     (ROOT/'src/generated').mkdir(exist_ok=True)

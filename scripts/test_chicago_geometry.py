@@ -424,3 +424,19 @@ class StreetGeometryTests(unittest.TestCase):
         for support in supports:
             x,_,z=support['position']
             self.assertGreaterEqual(Point(x,z).distance(deck),.55-1e-6)
+
+    def test_all_lamps_stand_on_sidewalks_close_to_curbs(self):
+        import json
+        env=json.loads((Path(__file__).resolve().parents[1]/'src/generated/chicago.json').read_text())['environment']
+        sidewalk=unary_union([Polygon(t) for t in env['sidewalks']])
+        asphalt=unary_union([Polygon(t) for t in env['roadSurface']])
+        self.assertGreater(len(env['lamps']),20)
+        for lamp in env['lamps']:
+            x,_,z=lamp['position'];point=Point(x,z)
+            self.assertTrue(sidewalk.buffer(1e-7).covers(point.buffer(.2)))
+            self.assertFalse(asphalt.intersects(point.buffer(.2)))
+            self.assertLessEqual(point.distance(asphalt),1.2+1e-6)
+
+    def test_lamps_skip_roads_without_sidewalk_space(self):
+        roads=[dict(bridge=False,width=10,points=[[0,0],[100,0]])]
+        self.assertEqual(city.street_lamps(roads,Polygon(),box(0,-5,100,5)),[])
