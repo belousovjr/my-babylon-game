@@ -1,0 +1,79 @@
+# Chicago Loop source data
+
+Snapshot date: 2026-11-07. Bounding box: west -87.642, south 41.877,
+east -87.6195, north 41.8915. Approximate extent: 1.86 km east–west × 1.61 km north–south.
+Origin: longitude -87.63075, latitude 41.88425. Projection is a local equirectangular
+approximation; one game unit is one metre, X east, Z north. This is a bounded district,
+not all downtown Chicago.
+
+## Source and licence
+
+© OpenStreetMap contributors, Open Database Licence (ODbL) 1.0.
+Original data: https://www.openstreetmap.org/#map=15/41.88425/-87.63075
+Attribution and licence: https://www.openstreetmap.org/copyright
+Licence text: https://opendatacommons.org/licenses/odbl/1-0/
+
+The compressed source snapshot, extracted footprints, SVG map and generated map database
+are OSM-derived data distributed under ODbL. Application code and procedural architecture
+are separate from this data. Visible attribution is included in the game and SVG map.
+
+- `osm-snapshot.xml.gz`: deduplicated source geometry/tags; contributor metadata and unrelated POIs removed.
+- `buildings.json`: original clipped footprints, architectural classification, height and height provenance.
+- `report.json`: counts and provenance summary.
+- `../../src/generated/chicago.json`: generated runtime scene and procedural street data.
+- `../../public/maps/chicago.svg`: north-up schematic map, named landmarks, metric scale and spawn marker.
+- `osm-*.xml` and `river-*.xml`: ignored HTTP download cache.
+
+## Pipeline
+
+From the repository root, with Python 3.10+ and Shapely 2.1+ installed:
+
+```sh
+python3 -m pip install -r scripts/requirements.txt
+npm run city:build
+```
+
+This rebuilds entirely offline from the tracked snapshot. The application itself needs
+neither Python nor Shapely. To fetch raw source again, clear the ignored XML cache, then run:
+
+```sh
+npm run city:fetch
+npm run city:build
+```
+
+The fetcher uses nine small official OSM API map requests, at most two at once,
+and three full river relations. It reuses existing cache files. The packer deduplicates
+and strips source metadata. The builder clips geometry, projects to metres, fits oriented
+building rectangles, classifies templates and generates terrain/road polygons. Triangulation
+and road/sidewalk unions run offline, never in the browser. Assertions and application tests
+check IDs, dimensions, heights, triangle orientation, spawn support and LOD reduction.
+
+## Accuracy and deliberate simplification
+
+- Building positions and footprint dimensions come from OSM. Rendered shapes/colliders fit
+  oriented rectangles; courtyards, concave footprints and overhangs are not reproduced.
+- Heights: explicit OSM heights (including overlapping building parts), then `building:levels × 3.6 m`.
+  Buildings without either use a deterministic 24/55 m estimate based on footprint area.
+  Provenance is stored per building; current counts are in `report.json`.
+- Landmark overrides use approximate overall heights to preserve the skyline: Willis 442 m,
+  Trump 423 m including spire, Marina City 179 m, Tribune 141 m, Wrigley up to 134 m;
+  a lower Wrigley component retains its OSM-part height when available.
+- Style classification uses names, height and construction year where present. It is a visual
+  approximation, not an architectural inventory. Materials are flat vertex colors, without textures.
+- Street widths use tagged width, otherwise lane count × 3.2 m, with a 9–26 m fallback envelope.
+  Buildings and road geometry can disagree where OSM is incomplete or the rectangle approximation expands a footprint.
+- The Loop street datum is flat at 0 m. Sidewalks +0.16 m, river water -5.5 m and Riverwalk -3.8 m
+  are schematic local elevations, not DEM/LiDAR measurements. Quay walls and four ramps show
+  the level difference. Full Lower Wacker/tunnel interiors are excluded.
+- Street bridges share the street datum. Bridge mechanics, exact bridge slopes and handrails are omitted.
+- Elevated L alignment comes from OSM rail lines; deck clearance is an estimated 6 m.
+- Trees and lamps are procedurally spaced along eligible streets. They are not individually surveyed
+  positions; lamps are geometry, without hundreds of real light sources. No trains, traffic or interiors.
+
+Architectural reference sources:
+
+- Willis Tower (SOM): https://www.som.com/projects/willis-tower-formerly-sears-tower/
+- Marina City (Chicago Architecture Center): https://www.architecture.org/online-resources/buildings-of-chicago/marina-city/
+- Wrigley Building (Chicago Architecture Center): https://www.architecture.org/online-resources/buildings-of-chicago/wrigley-building/
+- Tribune Tower (Chicago Architecture Center): https://www.architecture.org/online-resources/buildings-of-chicago/tribune-tower/
+- Riverwalk vertical arrangement: https://www.rudybruneraward.org/wp-content/uploads/2017/06/Chicago_Riverwalk_FULL.pdf

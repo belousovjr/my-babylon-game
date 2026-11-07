@@ -48,3 +48,5 @@ footer { position: absolute; bottom: 22px; left: 32px; right: 32px; display: fle
 #editor details { margin: 12px 0; font-size: 11px; }
 #editor summary { cursor: pointer; color: #d4a663; }
 #template-from-object, #save-template { width: 100%; font-size: 11px; }
+#attribution { position: absolute; bottom: 2px; left: 35px; font-size: 9px; color: #203a40; background: #e6ece6db; padding: 2px 6px; border-radius: 2px; }
+#editor a { color: #d4a663; }

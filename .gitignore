@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Raw download cache; compact OSM snapshot and generated data are tracked.
+data/chicago/*.xml
+data/chicago/map.osm
+data/chicago/osm.json
+data/chicago/buildings.geojson

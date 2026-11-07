@@ -14,18 +14,22 @@ import { ImportMeshAsync } from '@babylonjs/core/Loading/sceneLoader.js';
 import '@babylonjs/core/Collisions/collisionCoordinator.js';
 import '@babylonjs/core/Culling/ray.js';
 import '@babylonjs/loaders/glTF/2.0/glTFLoader.js';
-import { CELL_SIZE, cellAt, createWorld, parseWorld, objectProperties, setObjectSize, WORLD_LIMIT } from './world';
+import { CELL_SIZE, cellAt, createWorld, parseWorld, objectProperties, setObjectSize, WORLD_LIMIT, MAX_SIZE } from './world';
 import type { Kind, ObjectTemplate, Triple, WorldData, WorldObject } from './world';
 import { initialPlayerState, stepPlayer } from './player';
 import { FollowCamera, MIN_CAMERA_DISTANCE } from './followCamera';
+import { buildArchitecture, PROFILES } from './architecture';
+import type { Profile } from './architecture';
+import type { InstancedMesh } from '@babylonjs/core/Meshes/instancedMesh.js';
+import { drawChicagoStreets } from './streets';
 import { AnimationBlend } from './animationBlend';
 import './style.css';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML = `
   <canvas id="renderCanvas" tabindex="0" aria-label="Игровой мир. WASD — движение, Shift — бег, Space — прыжок, Tab — редактор."></canvas>
-  <header><div class="brand"><span class="mark">B/</span><div>BLOCK DISTRICT<small>ЛОКАЛЬНЫЙ ПРОТОТИП · 01</small></div></div><button id="mode">Редактор <kbd>Tab</kbd></button></header>
-  <div id="intro"><span class="eyebrow">ПЕСОЧНИЦА / ОФЛАЙН</span><h1>Город начинается<br>с одного квартала.</h1><p>Исследуй пространство. Меняй его под себя.</p></div>
+  <header><div class="brand"><span class="mark">B/</span><div>CHICAGO / LOOP<small>ЛОКАЛЬНАЯ ЛОКАЦИЯ · МАСШТАБ 1:1</small></div></div><button id="mode">Редактор <kbd>Tab</kbd></button></header>
+  <div id="intro"><span class="eyebrow">ПЕСОЧНИЦА / ОФЛАЙН</span><h1>Chicago Loop<br>от улицы до силуэта.</h1><p>Река, мосты и архитектура центра Чикаго.</p></div>
   <aside id="editor" hidden aria-label="Редактор карты">
     <div class="panel-heading"><span class="eyebrow">МАСТЕРСКАЯ</span><h2>Редактор локации</h2></div>
     <p class="muted">Клик по объекту — выбор. ПКМ + WASD — полёт. Q / E — вниз / вверх.</p>
@@ -35,13 +39,19 @@ app.innerHTML = `
     <details><summary>Свойства шаблона</summary>
       <label>Название<input id="template-name" maxlength="80"></label>
       <label>Категория<select id="template-kind"><option value="building">Здание</option><option value="ground">Земля</option><option value="obstacle">Препятствие</option></select></label>
-      <label>Размеры X / Y / Z, м</label><div class="tools"><input id="template-x" type="number" min="0.25" max="128" step="0.25" aria-label="Ширина шаблона"><input id="template-y" type="number" min="0.25" max="128" step="0.25" aria-label="Высота шаблона"><input id="template-z" type="number" min="0.25" max="128" step="0.25" aria-label="Глубина шаблона"></div>
+      <label>Размеры X / Y / Z, м</label><div class="tools"><input id="template-x" type="number" min="0.25" max="768" step="0.25" aria-label="Ширина шаблона"><input id="template-y" type="number" min="0.25" max="768" step="0.25" aria-label="Высота шаблона"><input id="template-z" type="number" min="0.25" max="768" step="0.25" aria-label="Глубина шаблона"></div>
+      <label>Архитектура<select id="template-profile"></select></label>
+      <label>Дистанции LOD, м<input id="template-lod" placeholder="180, 650" aria-label="Дистанции переключения LOD"></label>
+      <p class="muted">0–2 расстояния по возрастанию: 1–3 уровня. LOD 0 — самый подробный.</p>
       <label>Цвет<input id="template-color" type="color"></label>
       <button id="save-template">Применить ко всем связанным объектам</button>
       <button id="delete-template" class="danger quiet">Удалить неиспользуемый шаблон</button>
       <p class="muted">Индивидуальные размеры и цвет сохраняются. Позиции объектов не меняются.</p>
     </details>
     <div class="tools"><button id="add">+ Добавить</button><button id="duplicate">Копия</button><button id="delete" class="danger">Удалить</button></div>
+    <label>LOD выбранного объекта<select id="lod-preview"><option value="-1">Автоматически</option><option value="0">LOD 0 · ближний</option><option value="1">LOD 1 · средний</option><option value="2">LOD 2 · дальний</option></select></label>
+    <div class="tools"><button id="city-overview">Обзор города</button><button id="focus-object">К объекту</button></div>
+    <p class="muted"><a href="/maps/chicago.svg" target="_blank">Карта и масштаб ↗</a> · уличный слой генерируется отдельно.</p>
     <div id="selection">Выберите объект в сцене</div>
     <div class="tools"><button id="assign-template">Назначить шаблон</button><button id="reset-overrides">Сбросить изменения</button></div>
     <button id="template-from-object">Новый шаблон из выбранного объекта</button>
@@ -49,10 +59,10 @@ app.innerHTML = `
     <label class="file-button">Импорт JSON<input id="import" type="file" accept=".json,application/json"></label>
     <button id="spawn">Точка старта ← позиция игрока</button>
     <p class="muted">Сохранение — в этом браузере. Экспортируйте JSON для резервной копии и Git.</p>
-    <button id="reset" class="danger quiet">Восстановить исходный квартал</button>
+    <button id="reset" class="danger quiet">Восстановить Chicago Loop</button>
   </aside>
   <div id="notice" role="status" aria-live="polite">Загрузка персонажа…</div>
-  <footer><div id="help"><span><kbd>W A S D</kbd> движение</span><span><kbd>Shift</kbd> бег</span><span><kbd>Space</kbd> прыжок</span><span>мышь + ЛКМ · камера</span><span><kbd>R</kbd> на старт</span></div><div id="stats">—</div></footer>`;
+  <footer><div id="help"><span><kbd>W A S D</kbd> движение</span><span><kbd>Shift</kbd> бег</span><span><kbd>Space</kbd> прыжок</span><span>мышь + ЛКМ · камера</span><span><kbd>R</kbd> на старт</span></div><div id="stats">—</div></footer><a id="attribution" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors · ODbL</a>`;
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const canvas = $<HTMLCanvasElement>('renderCanvas');
 const engine = new Engine(canvas, true, { stencil: true });
@@ -61,7 +71,7 @@ const scene = new Scene(engine);
 scene.clearColor = Color4.FromHexString('#bacbccff');
 scene.fogMode = Scene.FOGMODE_LINEAR;
 scene.fogColor = Color3.FromHexString('#bacbcc');
-scene.fogStart = 80; scene.fogEnd = 190;
+scene.fogStart = 1500; scene.fogEnd = 4000;
 scene.collisionsEnabled = true;
 const light = new HemisphericLight('sky', new Vector3(0.4, 1, 0.3), scene);
 light.intensity = 1.05;
@@ -71,12 +81,12 @@ camera.lowerRadiusLimit = MIN_CAMERA_DISTANCE; camera.upperRadiusLimit = 16;
 camera.lowerBetaLimit = 0.25; camera.upperBetaLimit = Math.PI / 2 + Math.PI / 10;
 camera.wheelPrecision = 35; camera.panningSensibility = 0;
 camera.checkCollisions = false;
-camera.minZ = 0.1; camera.maxZ = 240;
+camera.minZ = 0.1; camera.maxZ = 3000;
 camera.attachControl(canvas, true);
 camera.inputs.removeByType('ArcRotateCameraKeyboardMoveInput');
 const editorCamera = new UniversalCamera('editor', new Vector3(32, 26, -5), scene);
 editorCamera.setTarget(new Vector3(32, 0, 30));
-editorCamera.minZ = 0.1; editorCamera.maxZ = 500; editorCamera.speed = 0.8;
+editorCamera.minZ = 1; editorCamera.maxZ = 4000; editorCamera.speed = 3;
 editorCamera.keysUp = [87]; editorCamera.keysDown = [83];
 editorCamera.keysLeft = [65]; editorCamera.keysRight = [68];
 editorCamera.keysUpward = [69]; editorCamera.keysDownward = [81];
@@ -96,14 +106,21 @@ function material(hex: string) {
   return mat;
 }
 const meshes = new Map<string, Mesh>();
-const templateMeshes = new Map<string, Mesh>();
+const templateMeshes = new Map<string, Mesh[]>();
+const modelLevels = new Map<Mesh, InstancedMesh[]>();
+let proceduralMeshes: Mesh[] = [];
+const furnitureRoots: Mesh[] = [];
+let previewLod = -1;
+const colliderSource = MeshBuilder.CreateBox('collision-prototype', { size: 1 }, scene);
+colliderSource.setEnabled(false);
+
 let activeCell = "";
 let world: WorldData = createWorld();
 let startupMessage = '';
 try {
-  const saved = localStorage.getItem('block-district-world-v1');
+  const saved = localStorage.getItem('block-district-chicago-v3');
   if (saved) world = parseWorld(JSON.parse(saved));
-} catch { startupMessage = 'Сохранённая карта недоступна. Открыт исходный квартал.'; }
+} catch { startupMessage = 'Сохранённая карта недоступна. Открыт Chicago Loop.'; }
 function updateCellCoverage(mesh: Mesh) {
   mesh.computeWorldMatrix(true);
   const bounds = mesh.getBoundingInfo().boundingBox;
@@ -112,32 +129,69 @@ function updateCellCoverage(mesh: Mesh) {
   mesh.metadata.minCellZ = Math.floor(bounds.minimumWorld.z / CELL_SIZE);
   mesh.metadata.maxCellZ = Math.floor(bounds.maximumWorld.z / CELL_SIZE);
 }
+function attachModel(root: Mesh, template: ObjectTemplate, color: string, pickable: boolean) {
+  const key = `${template.id}:${color}`;
+  let sources = templateMeshes.get(key);
+  if (!sources) { sources = buildArchitecture(template, scene, material(color)); templateMeshes.set(key, sources); }
+  const levels = sources.map((source, i) => {
+    const instance = source.createInstance(`${root.name}-lod${i}`);
+    instance.parent = root; instance.isPickable = pickable;
+    instance.metadata = { worldId: root.name }; instance.setEnabled(i === sources.length - 1);
+    return instance;
+  });
+  modelLevels.set(root, levels);
+}
 function addMesh(o: WorldObject) {
   const properties = objectProperties(world, o);
-  let source = templateMeshes.get(o.templateId);
-  if (!source) {
-    source = MeshBuilder.CreateBox(`template-${o.templateId}`, { size: 1 }, scene);
-    source.setEnabled(false); source.isPickable = false;
-    templateMeshes.set(o.templateId, source);
-  }
-  // Babylon clones share geometry; transforms, visibility and metadata stay individual.
-  const mesh = source.clone(o.id, null, true)!;
-  mesh.setEnabled(true); mesh.isPickable = true;
+  const mesh = colliderSource.clone(o.id, null, true)!;
+  mesh.setEnabled(true); mesh.isVisible = false; mesh.isPickable = false;
   mesh.position.copyFromFloats(...o.position); mesh.scaling.copyFromFloats(...properties.size);
-  mesh.rotation.y = o.yaw; mesh.material = material(properties.color);
-  mesh.checkCollisions = true; mesh.metadata = { worldId: o.id, kind: properties.kind };
+  mesh.rotation.y = o.yaw;
+  mesh.checkCollisions = true; mesh.metadata = { worldId: o.id, kind: properties.kind, templateId: o.templateId };
+  attachModel(mesh, world.templates.find(t => t.id === o.templateId)!, properties.color, true);
   updateCellCoverage(mesh);
   meshes.set(o.id, mesh); return mesh;
 }
+function updateLODs() {
+  const eye = scene.activeCamera!.position;
+  for (const [root, levels] of modelLevels) {
+    if (root.isDisposed() || !root.isEnabled()) continue;
+    const template = world.templates.find(t => t.id === root.metadata.templateId)!;
+    root.computeWorldMatrix(true);
+    const bounds = root.getBoundingInfo().boundingBox;
+    const distance = Vector3.Distance(eye, Vector3.Clamp(eye, bounds.minimumWorld, bounds.maximumWorld));
+    const level = editing && root === selected && previewLod >= 0 ? Math.min(previewLod, levels.length - 1) : (template.lodDistances ?? []).filter(d => distance >= d).length;
+    levels.forEach((mesh, i) => { mesh.setEnabled(i === level && (root.metadata.kind === 'building' || distance < 240)); mesh.visibility = root.visibility; });
+    root.metadata.lod = level;
+  }
+}
+
 function rebuild() {
   activeCell = '';
   select(null);
+  for (const levels of modelLevels.values()) for (const mesh of levels) mesh.dispose();
+  modelLevels.clear();
+  for (const m of [...proceduralMeshes, ...furnitureRoots]) m.dispose();
+  proceduralMeshes = []; furnitureRoots.length = 0;
   for (const m of meshes.values()) m.dispose();
   meshes.clear();
-  for (const source of templateMeshes.values()) source.dispose();
+  for (const sources of templateMeshes.values()) for (const source of sources) source.dispose();
   templateMeshes.clear();
   refreshTemplates();
   for (const o of world.objects) addMesh(o);
+  if (world.environment === 'chicago-loop') {
+    const streets = drawChicagoStreets(scene, material); proceduralMeshes = streets.meshes;
+    for (const [i, prop] of streets.props.entries()) {
+      const template = world.templates.find(t => t.id === prop.templateId);
+      if (!template) continue;
+      const root = colliderSource.clone(`street-prop-${i}`, null, true)!;
+      root.isVisible = false; root.isPickable = false; root.setEnabled(true);
+      root.position.copyFromFloats(...prop.position); root.scaling.copyFromFloats(...template.size); root.rotation.y = prop.yaw;
+      root.metadata = { templateId: template.id, kind: 'obstacle' };
+      attachModel(root, template, template.color, false); furnitureRoots.push(root);
+    }
+  }
+  updateLODs();
 }
 const player = MeshBuilder.CreateBox('player-collider', { size: 1 }, scene);
 player.isVisible = false; player.isPickable = false;
@@ -187,7 +241,7 @@ function syncObjects() {
   for (const o of world.objects) {
     const mesh = meshes.get(o.id)!;
     o.position = mesh.position.asArray() as Triple;
-    const size = mesh.scaling.asArray().map(n => Math.max(0.25, Math.min(128, n))) as Triple;
+    const size = mesh.scaling.asArray().map(n => Math.max(0.25, Math.min(MAX_SIZE, n))) as Triple;
     setObjectSize(world, o, size);
     mesh.scaling.copyFromFloats(...size);
     const yaw = mesh.rotationQuaternion ? mesh.rotationQuaternion.toEulerAngles().y : mesh.rotation.y;
@@ -200,11 +254,16 @@ function describeSelection() {
   const p = selected.position, s = selected.scaling;
   const object = world.objects.find(o => o.id === selected!.name)!;
   const template = world.templates.find(t => t.id === object.templateId)!;
-  $('selection').textContent = `${template.name} · ${template.kind}\n${object.size || object.color ? 'Есть индивидуальные изменения' : 'Наследует шаблон'}\n${selected.name}\nXYZ ${p.x.toFixed(1)} / ${p.y.toFixed(1)} / ${p.z.toFixed(1)}\nРазмер ${s.x.toFixed(1)} × ${s.y.toFixed(1)} × ${s.z.toFixed(1)} м`;
+  $('selection').textContent = `${object.name ?? template.name} · ${template.kind}\nLOD ${selected.metadata.lod ?? 0} / ${(template.lodDistances?.length ?? 0)} · △ ${(modelLevels.get(selected) ?? []).map(m => m.getTotalIndices() / 3).join(' / ')}\n${object.size || object.color ? 'Есть индивидуальные изменения' : 'Наследует шаблон'}\n${selected.name}\nXYZ ${p.x.toFixed(1)} / ${p.y.toFixed(1)} / ${p.z.toFixed(1)}\nРазмер ${s.x.toFixed(1)} × ${s.y.toFixed(1)} × ${s.z.toFixed(1)} м`;
 }
 function select(mesh: Mesh | null) {
   selected = mesh; gizmos.attachToMesh(editing ? mesh : null);
   for (const id of ['assign-template', 'reset-overrides', 'template-from-object']) $(id).toggleAttribute('disabled', !mesh);
+  const lodSelect = $<HTMLSelectElement>('lod-preview');
+  lodSelect.disabled = !mesh; $('focus-object').toggleAttribute('disabled', !mesh);
+  const maxLod = mesh ? modelLevels.get(mesh)!.length - 1 : 0;
+  for (const option of lodSelect.options) option.disabled = Number(option.value) > maxLod;
+  if (previewLod > maxLod) { previewLod = -1; lodSelect.value = '-1'; }
   if (mesh) {
     $<HTMLSelectElement>('template').value = world.objects.find(o => o.id === mesh.name)!.templateId;
     showTemplate();
@@ -278,7 +337,7 @@ $('snap').onchange = configureGizmos;
 scene.onPointerObservable.add(info => {
   if (info.type !== 1 || !editing || (info.event as PointerEvent).button !== 0) return;
   const mesh = info.pickInfo?.pickedMesh;
-  if (mesh instanceof Mesh && mesh.metadata?.worldId) select(mesh);
+  if (mesh?.metadata?.worldId && meshes.has(mesh.metadata.worldId)) select(meshes.get(mesh.metadata.worldId)!);
 });
 function chosenTemplate() { return world.templates.find(t => t.id === $<HTMLSelectElement>('template').value)!; }
 function showTemplate() {
@@ -288,6 +347,8 @@ function showTemplate() {
   $<HTMLSelectElement>('template-kind').value = t.kind;
   ['x', 'y', 'z'].forEach((axis, i) => { $<HTMLInputElement>(`template-${axis}`).value = String(t.size[i]); });
   $<HTMLInputElement>('template-color').value = t.color;
+  $<HTMLSelectElement>('template-profile').value = t.profile ?? 'box';
+  $<HTMLInputElement>('template-lod').value = (t.lodDistances ?? []).join(', ');
 }
 function refreshTemplates() {
   const select = $<HTMLSelectElement>('template'), previous = select.value;
@@ -299,7 +360,12 @@ function rebuildKeepingSelection(id = selected?.name) {
   cameraBoom.reset(); rebuild();
   if (id) select(meshes.get(id) ?? null);
 }
+$<HTMLSelectElement>('template-profile').replaceChildren(...PROFILES.map(p => new Option(p, p)));
 $('template').onchange = showTemplate;
+$('lod-preview').onchange = () => { previewLod = Number($<HTMLSelectElement>('lod-preview').value); updateLODs(); describeSelection(); };
+$('city-overview').onclick = () => { editorCamera.position.set(900, 850, 1100); editorCamera.setTarget(new Vector3(0, 70, 0)); canvas.focus(); };
+$('focus-object').onclick = () => { if (!selected) return; editorCamera.position.copyFrom(selected.position).addInPlaceFromFloats(40, 25, -65); editorCamera.setTarget(selected.position); canvas.focus(); };
+
 $('save-template').onclick = () => {
   try {
     syncObjects();
@@ -310,6 +376,8 @@ $('save-template').onclick = () => {
       kind: $<HTMLSelectElement>('template-kind').value as Kind,
       size: ['x', 'y', 'z'].map(axis => Number($<HTMLInputElement>(`template-${axis}`).value)) as Triple,
       color: $<HTMLInputElement>('template-color').value,
+      profile: $<HTMLSelectElement>('template-profile').value as Profile,
+      lodDistances: $<HTMLInputElement>('template-lod').value.trim() ? $<HTMLInputElement>('template-lod').value.split(',').map(Number) : [],
     };
     candidate.templates[candidate.templates.findIndex(item => item.id === t.id)] = updated;
     world = parseWorld(candidate); rebuildKeepingSelection(); markDirty();
@@ -343,7 +411,8 @@ $('template-from-object').onclick = () => {
   if (name === null) return;
   if (!name.trim() || name.length > 80) { notify('Название: от 1 до 80 символов.'); return; }
   const p = objectProperties(world, o);
-  const t: ObjectTemplate = { id: crypto.randomUUID(), name: name.trim(), kind: p.kind, size: [...p.size], color: p.color };
+  const source = world.templates.find(t => t.id === o.templateId)!;
+  const t: ObjectTemplate = { ...structuredClone(source), id: crypto.randomUUID(), name: name.trim(), kind: p.kind, size: [...p.size], color: p.color };
   world.templates.push(t); o.templateId = t.id; delete o.size; delete o.color;
   rebuildKeepingSelection(); markDirty(); notify('Шаблон создан из выбранного объекта.');
 };
@@ -351,7 +420,7 @@ $('add').onclick = () => {
   const t = chosenTemplate();
   const center = editorCamera.position.add(editorCamera.getForwardRay().direction.scale(18));
   const o: WorldObject = { id: crypto.randomUUID(), templateId: t.id, position: [Math.round(center.x), t.kind === 'ground' ? -t.size[1] / 2 : t.size[1] / 2, Math.round(center.z)], yaw: 0 };
-  if (world.objects.length >= 2000 || Math.abs(o.position[0]) > WORLD_LIMIT || Math.abs(o.position[2]) > WORLD_LIMIT) { notify('Лимит: 2000 объектов, координаты ±2048 м.'); return; }
+  if (world.objects.length >= 2000 || Math.abs(o.position[0]) > WORLD_LIMIT || Math.abs(o.position[2]) > WORLD_LIMIT) { notify('Лимит: 2000 объектов, координаты ±4096 м.'); return; }
   world.objects.push(o); select(addMesh(o)); markDirty();
 };
 $('duplicate').onclick = () => {
@@ -365,12 +434,14 @@ $('duplicate').onclick = () => {
 $('delete').onclick = () => {
   if (!selected) return;
   const mesh = selected; select(null); meshes.delete(mesh.name);
-  world.objects = world.objects.filter(o => o.id !== mesh.name); mesh.dispose(); markDirty();
+  world.objects = world.objects.filter(o => o.id !== mesh.name);
+  for (const level of modelLevels.get(mesh) ?? []) level.dispose(); modelLevels.delete(mesh);
+  mesh.dispose(); markDirty();
 };
 function snapshot() { syncObjects(); return parseWorld(world); }
 $('save').onclick = () => {
   try {
-    const data = snapshot(); localStorage.setItem('block-district-world-v1', JSON.stringify(data));
+    const data = snapshot(); localStorage.setItem('block-district-chicago-v3', JSON.stringify(data));
     dirty = false; $('save').textContent = 'Сохранить'; notify('Карта сохранена в этом браузере.');
   } catch (e) { notify(`Не удалось сохранить: ${e instanceof Error ? e.message : 'хранилище недоступно'}`); }
 };
@@ -385,7 +456,7 @@ $('export').onclick = () => {
 $<HTMLInputElement>('import').onchange = async event => {
   const input = event.target as HTMLInputElement; const file = input.files?.[0]; if (!file) return;
   try {
-    if (file.size > 2_000_000) throw new Error('Файл больше 2 МБ.');
+    if (file.size > 4_000_000) throw new Error('Файл больше 4 МБ.');
     const next = parseWorld(JSON.parse(await file.text()));
     if (dirty && !confirm('Заменить карту? Несохранённые изменения будут потеряны.')) return;
     world = next; rebuild(); respawn(); markDirty(); notify('Карта импортирована. Нажмите «Сохранить», чтобы оставить её в браузере.');
@@ -394,8 +465,8 @@ $<HTMLInputElement>('import').onchange = async event => {
 };
 $('spawn').onclick = () => { world.spawn = player.position.asArray() as Triple; world.spawn[1] = Math.max(1, world.spawn[1]); markDirty(); notify('Точка старта обновлена по позиции игрока.'); };
 $('reset').onclick = () => {
-  if (!confirm('Заменить текущую карту исходным кварталом?')) return;
-  world = createWorld(); rebuild(); respawn(); markDirty(); notify('Исходная карта восстановлена. Сохранение в браузере пока не изменено.');
+  if (!confirm('Заменить текущую карту исходным Chicago Loop?')) return;
+  world = createWorld(); rebuild(); respawn(); markDirty(); notify('Chicago Loop восстановлен. Сохранение в браузере пока не изменено.');
 };
 window.addEventListener('beforeunload', event => { if (dirty) { event.preventDefault(); event.returnValue = ''; } });
 function inForm(target: EventTarget | null) { return target instanceof HTMLElement && !!target.closest('input, select, textarea, button'); }
@@ -438,6 +509,7 @@ rebuild(); configureGizmos(); watchGizmos(); respawn();
 void loadCharacter();
 let accumulator = 0;
 let statsTime = 0;
+let lodTime = 0;
 engine.runRenderLoop(() => {
   const dt = Math.min(engine.getDeltaTime() / 1000, 0.1);
   if (!editing && !document.hidden) {
@@ -452,23 +524,27 @@ engine.runRenderLoop(() => {
       // shortcut: cells only toggle existing meshes; load/unload assets when the map outgrows memory.
       for (const m of meshes.values()) {
         const b = m.metadata;
-        m.setEnabled(b.minCellX <= cx! + 1 && b.maxCellX >= cx! - 1 && b.minCellZ <= cz! + 1 && b.maxCellZ >= cz! - 1);
+        m.setEnabled((b.minCellX <= cx! + 2 && b.maxCellX >= cx! - 2 && b.minCellZ <= cz! + 2 && b.maxCellZ >= cz! - 2) || m.scaling.y > 120);
       }
     }
   } else { accumulator = 0; }
   if (!editing) {
     // The orbit camera owns input/desired zoom; the render camera owns the collision-safe pose.
     camera.update();
-    cameraBoom.update(camera.target, camera.position, meshes.values(), dt);
+    cameraBoom.update(camera.target, camera.position, [...meshes.values(), ...proceduralMeshes], dt);
     followCamera.position.copyFrom(cameraBoom.position);
     followCamera.setTarget(camera.target);
   }
+  lodTime += dt;
+  if (lodTime >= 0.15) { updateLODs(); lodTime = 0; }
+  // Visibility is per instance, so one occluder can fade without affecting its template siblings.
+  for (const [root, levels] of modelLevels) for (const mesh of levels) mesh.visibility = root.visibility;
   scene.render();
   statsTime += dt;
   if (statsTime >= 0.5) {
     statsTime = 0;
     const count = [...meshes.values()].filter(m => m.isEnabled()).length;
-    $('stats').textContent = `${Math.round(engine.getFps())} FPS · ${count} объектов · ячейка ${cellAt(player.position.x, player.position.z)}`;
+    $('stats').textContent = `${Math.round(engine.getFps())} FPS · ${count} зданий · ${scene.getActiveMeshes().length} мешей · ячейка ${cellAt(player.position.x, player.position.z)}`;
     if (editing) describeSelection();
   }
 });

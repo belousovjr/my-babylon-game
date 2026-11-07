@@ -1,4 +1,5 @@
 import { Matrix, Vector3 } from '@babylonjs/core/Maths/math.vector.js';
+import { Ray } from '@babylonjs/core/Culling/ray.js';
 import type { Mesh } from '@babylonjs/core/Meshes/mesh.js';
 
 export const MIN_CAMERA_DISTANCE = 2.5;
@@ -8,7 +9,7 @@ const SKIN = 0.04;
 // Segment versus an expanded local box: a conservative sphere sweep for our box-built world.
 // shortcut: box bounds suit this city; use physics sphere casts if irregular level geometry is added.
 export function boxEntry(origin: Vector3, direction: Vector3, length: number, mesh: Mesh, radius: number): number | null {
-  mesh.computeWorldMatrix(true);
+  if (!mesh.isWorldMatrixFrozen) mesh.computeWorldMatrix(true);
   const inverse = Matrix.Invert(mesh.getWorldMatrix());
   const start = Vector3.TransformCoordinates(origin, inverse);
   const delta = Vector3.TransformNormal(direction, inverse);
@@ -25,6 +26,14 @@ export function boxEntry(origin: Vector3, direction: Vector3, length: number, me
       enter = Math.max(enter, a); exit = Math.min(exit, b);
       if (enter > exit) return null;
     }
+  }
+  if (mesh.metadata?.procedural) {
+    let nearest: number | null = null;
+    for (const offset of [Vector3.Zero(), new Vector3(radius, 0, 0), new Vector3(-radius, 0, 0), new Vector3(0, radius, 0), new Vector3(0, -radius, 0), new Vector3(0, 0, radius), new Vector3(0, 0, -radius)]) {
+      const hit = new Ray(origin.add(offset), direction, length).intersectsMesh(mesh);
+      if (hit.hit && hit.distance <= length) nearest = Math.min(nearest ?? length, hit.distance);
+    }
+    return nearest;
   }
   return enter;
 }
@@ -75,7 +84,13 @@ export class FollowCamera {
       if (lookAhead.length() > 1) lookAhead.normalize();
     }
     this.previousTarget = target.clone();
-    const blockers = [...obstacles].filter(mesh => !mesh.isDisposed() && mesh.isEnabled() && mesh.checkCollisions);
+    const range = wanted + 3;
+    const blockers = [...obstacles].filter(mesh => {
+      if (mesh.isDisposed() || !mesh.isEnabled() || !mesh.checkCollisions) return false;
+      if (!mesh.isWorldMatrixFrozen) mesh.computeWorldMatrix(true);
+      const bounds = mesh.getBoundingInfo().boundingBox;
+      return Vector3.DistanceSquared(target, Vector3.Clamp(target, bounds.minimumWorld, bounds.maximumWorld)) <= range * range;
+    });
     const travel = lookAhead.length();
     if (travel > 0.001) {
       const heading = lookAhead.scale(1 / travel);

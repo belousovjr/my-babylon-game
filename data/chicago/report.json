@@ -1,0 +1,33 @@
+{
+  "buildings": 726,
+  "roads": 855,
+  "families": {
+    "stone": 488,
+    "glass": 228,
+    "clock": 2,
+    "marina": 2,
+    "deco": 3,
+    "gothic": 1,
+    "bundled": 1,
+    "rounded": 1
+  },
+  "heights": {
+    "osm-height": 201,
+    "estimated": 136,
+    "osm-levels": 382,
+    "landmark-reference": 7
+  },
+  "bounds": [
+    -87.642,
+    41.877,
+    -87.6195,
+    41.8915
+  ],
+  "origin": [
+    -87.63075,
+    41.88425
+  ],
+  "licence": "ODbL-1.0",
+  "attribution": "\u00a9 OpenStreetMap contributors",
+  "waterArea": 222232.54
+}
