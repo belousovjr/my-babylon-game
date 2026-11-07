@@ -6,9 +6,10 @@ import json, math, re, glob, xml.etree.ElementTree as ET
 from pathlib import Path
 from collections import Counter, defaultdict
 from shapely.geometry import Polygon, LineString, Point, box, MultiPolygon
-from shapely.ops import unary_union, polygonize
+from shapely.ops import unary_union, polygonize, linemerge
 from shapely import constrained_delaunay_triangles, set_precision
 from shapely.geometry.polygon import orient
+from shapely.affinity import rotate, translate
 
 ROOT=Path(__file__).resolve().parents[1]
 LON,LAT=-87.63075,41.88425
@@ -42,6 +43,45 @@ def street_surfaces(roads,bounds):
     asphalt=snap_outline(asphalt.simplify(0.6).intersection(bounds))
     pavement=snap_outline(asphalt.buffer(3.2,join_style=3).intersection(bounds))
     return asphalt,pavement.difference(asphalt),pavement
+
+def elevated_metro(t):
+    return (t.get('railway')=='subway' and t.get('operator')=='Chicago Transit Authority'
+            and number(t.get('layer'))>0 and t.get('tunnel')!='yes' and not t.get('service'))
+
+def railway_geometry(lines,bounds,water):
+    tracks=unary_union(lines)
+    if tracks.is_empty:return dict(deck=[],edges=[],rails=[],railEdges=[],supports=[])
+    # Merge before clipping; short way fragments and shared endpoints are part of the same route.
+    tracks=linemerge(tracks) if tracks.geom_type=='MultiLineString' else tracks
+    paths=list(tracks.geoms) if hasattr(tracks,'geoms') else [tracks]
+    deck=unary_union([line.buffer(2.1,cap_style=2,join_style=2,mitre_limit=2) for line in paths]).intersection(bounds)
+    rails=unary_union([line.offset_curve(side,join_style=2,mitre_limit=2).buffer(.045,cap_style=2,join_style=2) for line in paths for side in [-.72,.72]]).intersection(bounds)
+    supports=[]
+    unsupported_water=water.buffer(1)
+    for ring in rings(deck):
+        edge=LineString(ring)
+        for distance in range(12,int(edge.length),32):
+            point=edge.interpolate(distance)
+            if not unsupported_water.covers(point): supports.append([point.x,point.y])
+    return dict(deck=triangles(deck),edges=rings(deck),rails=triangles(rails),railEdges=rings(rails),supports=supports)
+
+def fit_rail_clearance(o,corridor):
+    w,h,d=o['size'];x,y,z=o['position']
+    local=rotate(translate(corridor,-x,-z),o['yaw'],origin=(0,0),use_radians=True)
+    footprint=box(-w/2,-d/2,w/2,d/2)
+    overlap=footprint.intersection(local)
+    if overlap.area<1e-6:return o
+    a,b,c,e=overlap.bounds
+    candidates=[(-w/2,-d/2,a-1,d/2),(c+1,-d/2,w/2,d/2),(-w/2,-d/2,w/2,b-1),(-w/2,e+1,w/2,d/2)]
+    for left,bottom,right,top in sorted(candidates,key=lambda v:max(0,v[2]-v[0])*max(0,v[3]-v[1]),reverse=True):
+        width,depth=math.floor((right-left)*4)/4,math.floor((top-bottom)*4)/4
+        if min(width,depth)<5 or width*depth<w*d*.25:continue
+        cx,cz=(left+right)/2,(bottom+top)/2
+        nx=round(x+cx*math.cos(o['yaw'])+cz*math.sin(o['yaw']))
+        nz=round(z-cx*math.sin(o['yaw'])+cz*math.cos(o['yaw']))
+        fitted=translate(rotate(box(-width/2,-depth/2,width/2,depth/2),-o['yaw'],origin=(0,0),use_radians=True),nx,nz)
+        if fitted.intersection(corridor).area<1e-6:return dict(o,position=[nx,y,nz],size=[width,h,depth])
+    return None
 
 def unsupported_elevated_building(t):
     # Layer is ordering, not metres: do not invent ground-level towers for untyped elevated structures.
@@ -96,12 +136,9 @@ def main():
         if t.get('leisure')=='park':
             p=polygon(refs).intersection(bounds)
             if p.area>200: parks.append(p)
-        if t.get('railway') in ['rail','light_rail'] and number(t.get('layer'))>=1:
+        if elevated_metro(t):
             c=coords(refs)
-            if len(c)>1:
-                line=LineString(c).intersection(bounds)
-                for rail in (list(line.geoms) if hasattr(line,'geoms') else [line]):
-                    if rail.geom_type=='LineString' and rail.length>10:rails.append([[rounded(x),rounded(z)] for x,z in rail.simplify(2).coords])
+            if len(c)>1:rails.append(LineString(c))
         if t.get('highway') in ['primary','secondary','tertiary','residential','unclassified','trunk'] and t.get('tunnel')!='yes' and number(t.get('layer'))>=0:
             c=coords(refs)
             if len(c)<2:continue
@@ -111,6 +148,8 @@ def main():
                 if line.geom_type!='LineString' or line.length<5:continue
                 width=number(t.get('width')) or max(9,min(26,(number(t.get('lanes')) or (3 if t['highway'] in ['primary','secondary'] else 2))*3.2))
                 roads.append({'id':f'osm-{wid}','name':t.get('name',''),'width':rounded(width),'bridge':t.get('bridge') in ['yes','movable'] or line.intersects(water),'points':[[rounded(x),rounded(z)] for x,z in line.simplify(1).coords]})
+    railway=railway_geometry(rails,bounds,water)
+    rail_clearance=unary_union([Polygon(t) for t in railway['deck']]).buffer(1.5)
     specs=[
       ('glass','Стеклянная офисная башня',[32,100,32],'#759ca8',[180,650]),
       ('stone','Чикагская школа · каменный корпус',[36,55,30],'#b8ac91',[130,500]),
@@ -146,13 +185,16 @@ def main():
         for match,family,height in [('willis tower','bundled',442),('trump international','rounded',423),('tribune tower','gothic',141),('wrigley building','clock',134),('marina city 1','marina',179),('marina city 2','marina',179)]:
             if match in low:profile=family;h=height;method='landmark-reference'
         if profile=='clock' and 70<partheight<130: h=partheight
-        h=max(6,min(600,h));families[profile]+=1;heights[method]+=1
+        h=max(6,min(600,h))
         seen_ids[wid]+=1
         unique_id=wid if seen_ids[wid]==1 else f'{wid}-{seen_ids[wid]}'
         # Snap the footprint anchor; the vertical centre follows half-height to keep the base at zero.
         w,d,h=[round(value*4)/4 for value in [w,d,h]]
         yaw=round(yaw/(math.pi/12))*(math.pi/12)
         o=dict(id=f'osm-{unique_id}',templateId=profile,name=name or t.get('addr:street','Chicago building'),position=[round(rect.centroid.x),h/2,round(rect.centroid.y)],size=[w,h,d],yaw=yaw)
+        o=fit_rail_clearance(o,rail_clearance)
+        if o is None:continue
+        families[profile]+=1;heights[method]+=1
         objects.append(o)
         source.append(dict(id=wid,name=name,height=rounded(h),heightSource=method,profile=profile,footprint=[[rounded(x),rounded(z)] for x,z in p.exterior.coords]))
     road_union,sidewalks,pavement=street_surfaces(roads,bounds)
@@ -197,7 +239,7 @@ def main():
         nx,nz=-dz/length,dx/length
         if water.contains(Point(mx+nx*2,mz+nz*2)):nx,nz=-nx,-nz
         ramps.append({'top':[rounded(mx+nx*8),0.17,rounded(mz+nz*8)],'bottom':[rounded(mx+dx/length*32+nx*3),-3.78,rounded(mz+dz/length*32+nz*3)]})
-    env=dict(rails=rails,roadSurface=triangles(road_union),sidewalks=triangles(sidewalks),curbs=triangles(curbs),pavingEdges=paving_edges,terraceWalls=terrace_lines,ramps=ramps,origin=[LON,LAT],bounds=list(map(rounded,bounds.bounds)),roads=roads,terrain=terrain,water=triangles(water),riverwalk=triangles(riverwalk),parks=[tri for p in parks for tri in triangles(p.intersection(exposed_ground))],shorelines=rings(water),bridgeDeck=triangles(bridge),bridgeEdges=rings(bridge),bridgeAbutments=rings(abutments),bridgeRails=[[[float(x),float(z)] for x,z in line.coords] for line in rail_lines if line.geom_type=='LineString' and line.length>1])
+    env=dict(railway=railway,roadSurface=triangles(road_union),sidewalks=triangles(sidewalks),curbs=triangles(curbs),pavingEdges=paving_edges,terraceWalls=terrace_lines,ramps=ramps,origin=[LON,LAT],bounds=list(map(rounded,bounds.bounds)),roads=roads,terrain=terrain,water=triangles(water),riverwalk=triangles(riverwalk),parks=[tri for p in parks for tri in triangles(p.intersection(exposed_ground))],shorelines=rings(water),bridgeDeck=triangles(bridge),bridgeEdges=rings(bridge),bridgeAbutments=rings(abutments),bridgeRails=[[[float(x),float(z)] for x,z in line.coords] for line in rail_lines if line.geom_type=='LineString' and line.length>1])
     output=dict(world=world,environment=env,report=dict(buildings=len(objects),roads=len(roads),families=dict(families),heights=dict(heights),bounds=BBOX,origin=[LON,LAT],licence='ODbL-1.0',attribution='© OpenStreetMap contributors',waterArea=rounded(water.area)))
     assert len({o['id'] for o in objects})==len(objects), 'Duplicate OSM building IDs'
     (ROOT/'src/generated').mkdir(exist_ok=True)

@@ -1,8 +1,8 @@
 {
-  "buildings": 718,
+  "buildings": 713,
   "roads": 855,
   "families": {
-    "stone": 480,
+    "stone": 475,
     "glass": 228,
     "clock": 2,
     "marina": 2,
@@ -13,8 +13,8 @@
   },
   "heights": {
     "osm-height": 201,
-    "estimated": 128,
-    "osm-levels": 382,
+    "estimated": 126,
+    "osm-levels": 379,
     "landmark-reference": 7
   },
   "bounds": [

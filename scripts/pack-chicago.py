@@ -19,7 +19,7 @@ out=E.Element('osm',version='0.6',attribution='© OpenStreetMap contributors',li
 for i in sorted(nodeids):
  e=entries.get(('node',i))
  if e is not None:E.SubElement(out,'node',id=i,lon=e.attrib['lon'],lat=e.attrib['lat'])
-keep={'railway','name','height','building','building:part','building:levels','building:material','building:colour','start_date','highway','width','lanes','layer','bridge','tunnel','natural','water','leisure','type','addr:street'}
+keep={'operator','network','service','usage','railway','name','height','building','building:part','building:levels','building:material','building:colour','start_date','highway','width','lanes','layer','bridge','tunnel','natural','water','leisure','type','addr:street'}
 for e in [*(ways[i] for i in sorted(needed) if i in ways),*rels]:
  n=E.SubElement(out,e.tag,id=e.attrib['id'])
  for child in e:

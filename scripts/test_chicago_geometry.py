@@ -119,3 +119,43 @@ class StreetGeometryTests(unittest.TestCase):
             sides=unary_union([LineString(line) for line in edge['lines']])
             self.assertEqual(edge['top'],height)
             self.assertLess(surface.boundary.difference(sides.buffer(1e-6)).length,1e-5,'no exposed vertical edge')
+
+    def test_metro_classification_excludes_mainline_rail_and_tunnels(self):
+        tags=dict(railway='subway',operator='Chicago Transit Authority',layer='2',bridge='yes')
+        self.assertTrue(city.elevated_metro(tags))
+        self.assertFalse(city.elevated_metro(dict(tags,tunnel='yes')))
+        self.assertFalse(city.elevated_metro(dict(tags,service='siding')))
+        self.assertFalse(city.elevated_metro(dict(railway='rail',operator='Union Pacific Railroad',layer='1')))
+
+    def test_metro_deck_joins_short_fragments_parallel_tracks_and_corners(self):
+        lines=[LineString([(0,0),(1,0)]),LineString([(1,0),(30,0),(30,30)]),
+               LineString([(0,3),(27,3),(27,30)])]
+        result=city.railway_geometry(lines,box(-5,-5,35,35),Polygon())
+        deck=unary_union([Polygon(t) for t in result['deck']])
+        self.assertEqual(deck.geom_type,'Polygon','shared platform instead of separate track boxes')
+        for line in lines:self.assertTrue(deck.buffer(1e-6).covers(line))
+        self.assertGreater(len(result['rails']),0)
+
+    def test_generated_metro_is_connected_and_clear_of_buildings(self):
+        import json
+        from shapely.affinity import rotate,translate
+        data=json.loads((Path(__file__).resolve().parents[1]/'src/generated/chicago.json').read_text())
+        rail=data['environment']['railway']
+        deck=unary_union([Polygon(t) for t in rail['deck']])
+        self.assertEqual(deck.geom_type,'Polygon','Loop and its approaches form one continuous deck')
+        for o in data['world']['objects']:
+            w,h,d=o['size'];x,y,z=o['position']
+            visual=translate(rotate(box(-w*.515,-d*.515,w*.515,d*.515),-o['yaw'],origin=(0,0),use_radians=True),x,z)
+            self.assertLess(visual.intersection(deck).area,1e-6,o['id'])
+        self.assertGreater(len(rail['supports']),10)
+
+    def test_building_fit_preserves_grid_and_leaves_track_corridor_clear(self):
+        corridor=box(4,-30,8,30)
+        o=dict(position=[0,10,0],size=[20,20,20],yaw=0)
+        result=city.fit_rail_clearance(o,corridor)
+        self.assertIsNotNone(result)
+        w,h,d=result['size'];x,y,z=result['position']
+        self.assertLess(box(x-w/2,z-d/2,x+w/2,z+d/2).intersection(corridor).area,1e-6)
+        self.assertEqual(y-h/2,0)
+        self.assertEqual(x,round(x))
+        self.assertEqual(w*4,round(w*4))

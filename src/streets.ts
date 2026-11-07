@@ -83,14 +83,16 @@ export function drawChicagoStreets(scene: Scene, material: (color: string) => Ma
       }
     }
   }
-  // Elevated L tracks are geometry only; their 6 m clearance is a schematic street-level estimate.
-  for (const line of data.rails) for (let i = 1; i < line.length; i++) {
-    const a = line[i - 1]!, b = line[i]!, dx = b[0]! - a[0]!, dz = b[1]! - a[1]!, length = Math.hypot(dx, dz), yaw = -Math.atan2(dz, dx);
-    const x = (a[0]! + b[0]!) / 2, z = (a[1]! + b[1]!) / 2;
-    box(x, 6, z, length, 0.35, 3, yaw, '#505b55');
-    for (const side of [-0.7, 0.7]) box(x - dz / length * side, 6.25, z + dx / length * side, length, 0.12, 0.09, yaw, '#959b92');
-    for (let d = 15; d < length; d += 32) for (const side of [-1.3, 1.3]) box(a[0]! + dx * d / length - dz / length * side, 3, a[1]! + dz * d / length + dx / length * side, 0.35, 6, 0.35, 0, '#505b55');
+  function drawElevatedRailway() {
+    const railway = data.railway;
+    surface(railway.deck, 6, '#505b55', true);
+    surface(railway.deck, 5.65, '#505b55', true, true);
+    walls(railway.edges, 5.65, 6, '#505b55');
+    surface(railway.rails, 6.16, '#959b92', false);
+    walls(railway.railEdges, 6, 6.16, '#959b92');
+    for (const [x, z] of railway.supports) box(x!, 2.825, z!, 0.35, 5.65, 0.35, 0, '#505b55');
   }
+  drawElevatedRailway();
   walls(data.shorelines, -5.5, -3.8, '#868b83');
   walls(data.terraceWalls, -3.8, 0, '#868b83');
   surface(data.bridgeDeck, -0.85, '#505b55', true, true);

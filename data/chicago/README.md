@@ -69,7 +69,11 @@ check IDs, dimensions, heights, triangle orientation, spawn support and LOD redu
 - Street bridges share the street datum, with a 0.85 m structural underside and simple solid parapets.
   Structural decks extend across the lowered terraces and 2 m into land; simple bank abutments
   support the spans. Parapets continue across the terraces and stop before the land junctions. Bridge mechanics and exact slopes are omitted.
-- Elevated L alignment comes from OSM rail lines; deck clearance is an estimated 6 m.
+- Elevated L uses above-ground CTA `railway=subway` ways; mainline rail, yards and tunnels are excluded.
+  Shared nodes and short fragments are merged before clipping. Adjacent tracks share a continuous
+  closed deck with a top at 6 m and underside at 5.65 m; rails and supports are generated offline.
+  Building rectangles are fitted outside the track corridor on the editor grid; rectangles with
+  less than 25% usable area are omitted. Detailed station buildings/platforms are not modeled.
 - Trees and lamps are procedurally spaced along eligible streets. They are not individually surveyed
   positions; lamps are geometry, without hundreds of real light sources. No trains, traffic or interiors.
 
