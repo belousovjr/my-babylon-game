@@ -56,6 +56,12 @@ test('procedural streets have upward floors and walkable spawn without one objec
   for(const m of meshes) {
     assert.ok(m.metadata.procedural);assert.ok(m.getTotalIndices()>0);
     const normals=m.getVerticesData('normal')!;assert.ok(normals.every(Number.isFinite));
+    const positions=m.getVerticesData('position')!,uv=m.getVerticesData('uv')!;
+    assert.equal(uv.length,m.getTotalVertices()*2);assert.ok(uv.every(Number.isFinite));
+    for(let i=0;i<positions.length;i+=3) if(Math.abs(normals[i+1]!)>.99) {
+      assert.ok(Math.abs(uv[i/3*2]!-positions[i]!/4)<1e-4,'floor U stays aligned across cell boundaries');
+      assert.ok(Math.abs(uv[i/3*2+1]!-positions[i+2]!/4)<1e-4,'floor V stays aligned across cell boundaries');
+    }
   }
   const spawn=createWorld().spawn;
   const ray=new Ray(new Vector3(spawn[0],5,spawn[2]),Vector3.Down(),10);

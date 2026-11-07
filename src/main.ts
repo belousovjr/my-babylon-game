@@ -6,7 +6,6 @@ import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight.js';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
 import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode.js';
-import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js';
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color.js';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
 import { GizmoManager } from '@babylonjs/core/Gizmos/gizmoManager.js';
@@ -25,7 +24,7 @@ import type { InstancedMesh } from '@babylonjs/core/Meshes/instancedMesh.js';
 import { drawChicagoStreets, updateStreetDetailLODs } from './streets';
 import { AnimationBlend } from './animationBlend';
 import { LodTransitions, lodDistance, predictLodEye } from './lodTransitions';
-import { DitheredTileFadeMaterialPlugin } from '@babylonjs/core/Materials/ditheredTileFadeMaterialPlugin.js';
+import { CityMaterials, buildingSurface, streetSurface } from './cityMaterials';
 import './style.css';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
@@ -128,19 +127,8 @@ followCamera.minZ = 0.05; followCamera.maxZ = camera.maxZ;
 const cameraBoom = new FollowCamera();
 scene.activeCamera = followCamera;
 
-const materials = new Map<string, StandardMaterial>();
-function material(hex: string, priority = 0) {
-  const key = `${hex}:${priority}`;
-  let mat = materials.get(key);
-  if (!mat) {
-    mat = new StandardMaterial(key, scene); mat.diffuseColor = Color3.FromHexString(hex);
-    mat.specularColor = Color3.Black();
-    mat.zOffset = -priority; mat.zOffsetUnits = -priority;
-    DitheredTileFadeMaterialPlugin.GetOrCreate(mat);
-    mat.freeze(); materials.set(key, mat);
-  }
-  return mat;
-}
+const cityMaterials = new CityMaterials(scene, import.meta.env.BASE_URL);
+function material(hex: string, priority = 0) { return cityMaterials.get(hex, 'plain', 0, priority); }
 const playerNeighborhood = new NearbyMeshes(), cameraNeighborhood = new NearbyMeshes();
 const meshes = new Map<string, Mesh>();
 const templateMeshes = new Map<string, Mesh[]>();
@@ -176,9 +164,15 @@ function updateCellCoverage(mesh: Mesh) {
 }
 function attachModel(root: Mesh, template: ObjectTemplate, color: string, pickable: boolean) {
   const headings = root.metadata.signalHeadings as number[] | undefined;
-  const key = `${template.id}:${color}:${headings?.join(',') ?? ''}`;
+  const bodySurface = template.profile === 'stone' && root.scaling.y < 36 ? 'facade-brick' : buildingSurface(template);
+  const key = `${template.id}:${color}:${bodySurface}:${headings?.join(',') ?? ''}`;
   let sources = templateMeshes.get(key);
-  if (!sources) { sources = buildArchitecture(template, scene, material(color), material(color, 1), headings); templateMeshes.set(key, sources); }
+  if (!sources) {
+    sources = buildArchitecture(template, scene, material(color), material(color, 1), headings,
+      (lod, accent, luminous) => cityMaterials.get(luminous ? '#ffffff' : color,
+        accent || luminous ? buildingSurface(template, accent, luminous) : bodySurface, lod, accent || luminous ? 1 : 0));
+    templateMeshes.set(key, sources);
+  }
   const levels = sources.map((source, i) => {
     const instance = source.createInstance(`${root.name}-lod${i}`);
     instance.parent = root; instance.isPickable = pickable;
@@ -235,7 +229,7 @@ function rebuild() {
   refreshTemplates();
   for (const o of world.objects) addMesh(o);
   if (world.environment === 'chicago-loop') {
-    const streets = drawChicagoStreets(scene, material); proceduralMeshes = streets.meshes;
+    const streets = drawChicagoStreets(scene, (color, lod) => cityMaterials.get(color, streetSurface(color), lod)); proceduralMeshes = streets.meshes;
     for (const [i, prop] of streets.props.entries()) {
       let template = world.templates.find(t => t.id === prop.templateId);
       if (!template && prop.templateId === 'traffic_signal') {

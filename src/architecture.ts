@@ -37,17 +37,35 @@ export function attachCollisionGeometry(root: Mesh, source: Mesh): Mesh {
 }
 
 // Local geometry is normalized to the editable collision box. Materials and geometry are shared by instances.
-export function buildArchitecture(template: ObjectTemplate, scene: Scene, material: Material, detailMaterial: Material, signalHeadings: number[] = [0]): Mesh[] {
+export function buildArchitecture(template: ObjectTemplate, scene: Scene, material: Material, detailMaterial: Material, signalHeadings: number[] = [0], surfaceMaterial?: (lod: number, accent: boolean, luminous: boolean) => Material): Mesh[] {
   const profile = template.profile ?? 'box';
   return Array.from({ length: (template.lodDistances?.length ?? 0) + 1 }, (_, detail) => {
     const pieces: Mesh[] = [], accents: Mesh[] = [];
-    const part = (x: number, y: number, z: number, w: number, h: number, d: number, shade = 1, round: boolean | 'sphere' = false) => {
+    const part = (x: number, y: number, z: number, w: number, h: number, d: number, shade = 1, round: boolean | 'sphere' = false, luminous = false) => {
       const mesh = round === 'sphere' ? MeshBuilder.CreateSphere('part', { diameter: 1, segments: 4 }, scene) : round
         ? MeshBuilder.CreateCylinder('part', { diameter: 1, height: 1, tessellation: detail === 0 ? 12 : profile === 'marina' && detail >= 2 ? 6 : 8 }, scene)
         : MeshBuilder.CreateBox('part', { size: 1 }, scene);
       mesh.scaling.set(w, h, d); mesh.position.set(x, y, z);
       mesh.setVerticesData('color', Array.from({ length: mesh.getTotalVertices() }, () => [shade, shade, shade, 1]).flat());
-      mesh.material = shade === 1 ? material : detailMaterial;
+      mesh.material = surfaceMaterial?.(detail, shade !== 1, luminous) ?? (shade === 1 ? material : detailMaterial);
+      if (surfaceMaterial && profile !== 'tree' && !luminous) {
+        const positions = mesh.getVerticesData('position')!, normals = mesh.getVerticesData('normal')!, sourceUVs = mesh.getVerticesData('uv')!, uvs: number[] = [];
+        const facade = template.kind === 'building' && shade === 1 && profile !== 'marina';
+        for (let i = 0; i < positions.length; i += 3) {
+          const px = positions[i]! * w + x, py = positions[i + 1]! * h + y, pz = positions[i + 2]! * d + z;
+          const nx = Math.abs(normals[i]!), ny = Math.abs(normals[i + 1]!), nz = Math.abs(normals[i + 2]!);
+          if (facade && ny > 0.5) uvs.push(0.004 + positions[i]! * 0.004, 0.004 + positions[i + 2]! * 0.004);
+          else if (facade) {
+            const u = round ? sourceUVs[i / 3 * 2]! * Math.PI * template.size[0] / 16
+              : nx > nz ? pz * template.size[2] / 16 : px * template.size[0] / 16;
+            uvs.push(u, py + 0.5);
+          } else {
+            uvs.push((ny > 0.5 || nz >= nx ? px * template.size[0] : pz * template.size[2]) / 4,
+              (ny > 0.5 ? pz * template.size[2] : py * template.size[1]) / 4);
+          }
+        }
+        mesh.setVerticesData('uv', uvs);
+      }
       (shade === 1 ? pieces : accents).push(mesh);
       return mesh;
     };
@@ -94,7 +112,7 @@ export function buildArchitecture(template: ObjectTemplate, scene: Scene, materi
         housing.rotation.y = angle;
         for (const [i, color] of [[1, 0.04, 0.02], [0.12, 0.09, 0.01], [0.01, 0.09, 0.03]].entries()) {
           if (detail > 0 && i > 0) continue;
-          const lens = part(Math.sin(angle) * 0.355, 0.275 - i * 0.075, Math.cos(angle) * 0.355, 0.32, 0.045, 0.035, 1);
+          const lens = part(Math.sin(angle) * 0.355, 0.275 - i * 0.075, Math.cos(angle) * 0.355, 0.32, 0.045, 0.035, 1, false, true);
           lens.rotation.y = angle;
           lens.setVerticesData('color', Array.from({ length: lens.getTotalVertices() }, () => [...color, 1]).flat());
         }
@@ -102,7 +120,7 @@ export function buildArchitecture(template: ObjectTemplate, scene: Scene, materi
     } else if (profile === 'lamp') {
       part(0, -0.03, 0, 0.13, 0.94, 0.13, 0.8, detail === 0);
       part(0.23, 0.43, 0, 0.55, 0.04, 0.08, 1.2);
-      if (detail === 0) part(0.45, 0.4, 0, 0.25, 0.05, 0.25, 2);
+      if (detail === 0) part(0.45, 0.4, 0, 0.25, 0.05, 0.25, 2, false, true);
     } else {
       part(0, 0, 0, 1, 1, 1);
     }

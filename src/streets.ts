@@ -44,7 +44,7 @@ export function updateStreetDetailLODs(meshes: Mesh[], eye: Vector3, transition?
 }
 
 // Procedural surfaces are batched by 256 m cell and material, not editable world-object records.
-export function drawChicagoStreets(scene: Scene, material: (color: string) => Material) {
+export function drawChicagoStreets(scene: Scene, material: (color: string, lod: number) => Material) {
   const batches = new Map<string, { positions: number[]; indices: number[]; color: string; collision: boolean; layer: string; level: number }>();
   const props: StreetFurniture[] = [];
   const cube = VertexData.CreateBox({ size: 1 });
@@ -227,7 +227,14 @@ export function drawChicagoStreets(scene: Scene, material: (color: string) => Ma
     const mesh = new Mesh(`street-${key}`, scene), vertexData = new VertexData();
     vertexData.positions = b.positions; vertexData.indices = b.indices;
     const normals: number[] = []; VertexData.ComputeNormals(b.positions, b.indices, normals); vertexData.normals = normals;
-    vertexData.applyToMesh(mesh); mesh.material = material(b.color); mesh.checkCollisions = b.collision && b.level === 0;
+    // World-space planar UVs keep density and seams stable across cells and LODs.
+    vertexData.uvs = [];
+    for (let i = 0; i < b.positions.length; i += 3) {
+      const nx = Math.abs(normals[i]!), ny = Math.abs(normals[i + 1]!), nz = Math.abs(normals[i + 2]!);
+      vertexData.uvs.push((ny > 0.5 || nz >= nx ? b.positions[i]! : b.positions[i + 2]!) / 4,
+        (ny > 0.5 ? b.positions[i + 2]! : b.positions[i + 1]!) / 4);
+    }
+    vertexData.applyToMesh(mesh); mesh.material = material(b.color, b.level); mesh.checkCollisions = b.collision && b.level === 0;
     mesh.isPickable = mesh.checkCollisions; mesh.metadata = { worldId: mesh.name, kind: 'ground', procedural: true, detailLayer: b.layer, detailLevel: b.level };
     mesh.isVisible = b.level === 0;
     mesh.freezeWorldMatrix(); meshes.push(mesh);
