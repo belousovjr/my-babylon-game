@@ -43,3 +43,8 @@ footer { position: absolute; bottom: 22px; left: 32px; right: 32px; display: fle
 @media (max-width: 760px) { header { left: 16px; right: 16px; top: 16px; } #intro { left: 18px; top: 90px; } #editor { right: 12px; width: 280px; top: 76px; } footer { left: 12px; right: 12px; bottom: 12px; padding: 10px; } #help { gap: 8px; } #help span:nth-child(n+4) { display: none; } #stats { font-size: 9px; } #notice { left: 12px; bottom: 92px; } }
 .brand { background: #e6ece6e6; padding: 10px 14px; border-radius: 5px; }
 #intro { background: #e6ece6e6; padding: 18px 22px; border-radius: 5px; }
+#editor input:not([type=checkbox]):not([type=file]) { display: block; width: 100%; min-width: 0; margin-top: 7px; padding: 8px; background: #263b40; color: #eef1e9; border: 1px solid #c5d3cf33; border-radius: 4px; }
+#editor input[type=color] { height: 36px; padding: 3px !important; }
+#editor details { margin: 12px 0; font-size: 11px; }
+#editor summary { cursor: pointer; color: #d4a663; }
+#template-from-object, #save-template { width: 100%; font-size: 11px; }

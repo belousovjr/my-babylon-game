@@ -14,8 +14,8 @@ import { ImportMeshAsync } from '@babylonjs/core/Loading/sceneLoader.js';
 import '@babylonjs/core/Collisions/collisionCoordinator.js';
 import '@babylonjs/core/Culling/ray.js';
 import '@babylonjs/loaders/glTF/2.0/glTFLoader.js';
-import { CELL_SIZE, cellAt, createWorld, parseWorld, WORLD_LIMIT } from './world';
-import type { Kind, Triple, WorldData, WorldObject } from './world';
+import { CELL_SIZE, cellAt, createWorld, parseWorld, objectProperties, setObjectSize, WORLD_LIMIT } from './world';
+import type { Kind, ObjectTemplate, Triple, WorldData, WorldObject } from './world';
 import { initialPlayerState, stepPlayer } from './player';
 import { FollowCamera, MIN_CAMERA_DISTANCE } from './followCamera';
 import { AnimationBlend } from './animationBlend';
@@ -31,9 +31,20 @@ app.innerHTML = `
     <p class="muted">Клик по объекту — выбор. ПКМ + WASD — полёт. Q / E — вниз / вверх.</p>
     <div class="tools"><button data-tool="position" class="active">Перенос</button><button data-tool="rotation">Поворот</button><button data-tool="scale">Размер</button></div>
     <label class="check"><input id="snap" type="checkbox" checked> Привязка к сетке · 1 м / 15°</label>
-    <label>Новый объект<select id="kind"><option value="building">Здание</option><option value="obstacle">Препятствие</option><option value="ground">Земля</option></select></label>
+    <label>Шаблон<select id="template"></select></label>
+    <details><summary>Свойства шаблона</summary>
+      <label>Название<input id="template-name" maxlength="80"></label>
+      <label>Категория<select id="template-kind"><option value="building">Здание</option><option value="ground">Земля</option><option value="obstacle">Препятствие</option></select></label>
+      <label>Размеры X / Y / Z, м</label><div class="tools"><input id="template-x" type="number" min="0.25" max="128" step="0.25" aria-label="Ширина шаблона"><input id="template-y" type="number" min="0.25" max="128" step="0.25" aria-label="Высота шаблона"><input id="template-z" type="number" min="0.25" max="128" step="0.25" aria-label="Глубина шаблона"></div>
+      <label>Цвет<input id="template-color" type="color"></label>
+      <button id="save-template">Применить ко всем связанным объектам</button>
+      <button id="delete-template" class="danger quiet">Удалить неиспользуемый шаблон</button>
+      <p class="muted">Индивидуальные размеры и цвет сохраняются. Позиции объектов не меняются.</p>
+    </details>
     <div class="tools"><button id="add">+ Добавить</button><button id="duplicate">Копия</button><button id="delete" class="danger">Удалить</button></div>
     <div id="selection">Выберите объект в сцене</div>
+    <div class="tools"><button id="assign-template">Назначить шаблон</button><button id="reset-overrides">Сбросить изменения</button></div>
+    <button id="template-from-object">Новый шаблон из выбранного объекта</button>
     <div class="tools"><button id="save">Сохранить</button><button id="export">Экспорт JSON</button></div>
     <label class="file-button">Импорт JSON<input id="import" type="file" accept=".json,application/json"></label>
     <button id="spawn">Точка старта ← позиция игрока</button>
@@ -85,6 +96,7 @@ function material(hex: string) {
   return mat;
 }
 const meshes = new Map<string, Mesh>();
+const templateMeshes = new Map<string, Mesh>();
 let activeCell = "";
 let world: WorldData = createWorld();
 let startupMessage = '';
@@ -101,10 +113,19 @@ function updateCellCoverage(mesh: Mesh) {
   mesh.metadata.maxCellZ = Math.floor(bounds.maximumWorld.z / CELL_SIZE);
 }
 function addMesh(o: WorldObject) {
-  const mesh = MeshBuilder.CreateBox(o.id, { size: 1 }, scene);
-  mesh.position.copyFromFloats(...o.position); mesh.scaling.copyFromFloats(...o.size);
-  mesh.rotation.y = o.yaw; mesh.material = material(o.color);
-  mesh.checkCollisions = true; mesh.metadata = { worldId: o.id, kind: o.kind };
+  const properties = objectProperties(world, o);
+  let source = templateMeshes.get(o.templateId);
+  if (!source) {
+    source = MeshBuilder.CreateBox(`template-${o.templateId}`, { size: 1 }, scene);
+    source.setEnabled(false); source.isPickable = false;
+    templateMeshes.set(o.templateId, source);
+  }
+  // Babylon clones share geometry; transforms, visibility and metadata stay individual.
+  const mesh = source.clone(o.id, null, true)!;
+  mesh.setEnabled(true); mesh.isPickable = true;
+  mesh.position.copyFromFloats(...o.position); mesh.scaling.copyFromFloats(...properties.size);
+  mesh.rotation.y = o.yaw; mesh.material = material(properties.color);
+  mesh.checkCollisions = true; mesh.metadata = { worldId: o.id, kind: properties.kind };
   updateCellCoverage(mesh);
   meshes.set(o.id, mesh); return mesh;
 }
@@ -113,6 +134,9 @@ function rebuild() {
   select(null);
   for (const m of meshes.values()) m.dispose();
   meshes.clear();
+  for (const source of templateMeshes.values()) source.dispose();
+  templateMeshes.clear();
+  refreshTemplates();
   for (const o of world.objects) addMesh(o);
 }
 const player = MeshBuilder.CreateBox('player-collider', { size: 1 }, scene);
@@ -163,8 +187,9 @@ function syncObjects() {
   for (const o of world.objects) {
     const mesh = meshes.get(o.id)!;
     o.position = mesh.position.asArray() as Triple;
-    o.size = mesh.scaling.asArray().map(n => Math.max(0.25, Math.min(128, n))) as Triple;
-    mesh.scaling.copyFromFloats(...o.size);
+    const size = mesh.scaling.asArray().map(n => Math.max(0.25, Math.min(128, n))) as Triple;
+    setObjectSize(world, o, size);
+    mesh.scaling.copyFromFloats(...size);
     const yaw = mesh.rotationQuaternion ? mesh.rotationQuaternion.toEulerAngles().y : mesh.rotation.y;
     o.yaw = Math.atan2(Math.sin(yaw), Math.cos(yaw));
     updateCellCoverage(mesh);
@@ -173,10 +198,17 @@ function syncObjects() {
 function describeSelection() {
   if (!selected) { $('selection').textContent = 'Выберите объект в сцене'; return; }
   const p = selected.position, s = selected.scaling;
-  $('selection').textContent = `${selected.name}\nXYZ ${p.x.toFixed(1)} / ${p.y.toFixed(1)} / ${p.z.toFixed(1)}\nРазмер ${s.x.toFixed(1)} × ${s.y.toFixed(1)} × ${s.z.toFixed(1)} м`;
+  const object = world.objects.find(o => o.id === selected!.name)!;
+  const template = world.templates.find(t => t.id === object.templateId)!;
+  $('selection').textContent = `${template.name} · ${template.kind}\n${object.size || object.color ? 'Есть индивидуальные изменения' : 'Наследует шаблон'}\n${selected.name}\nXYZ ${p.x.toFixed(1)} / ${p.y.toFixed(1)} / ${p.z.toFixed(1)}\nРазмер ${s.x.toFixed(1)} × ${s.y.toFixed(1)} × ${s.z.toFixed(1)} м`;
 }
 function select(mesh: Mesh | null) {
   selected = mesh; gizmos.attachToMesh(editing ? mesh : null);
+  for (const id of ['assign-template', 'reset-overrides', 'template-from-object']) $(id).toggleAttribute('disabled', !mesh);
+  if (mesh) {
+    $<HTMLSelectElement>('template').value = world.objects.find(o => o.id === mesh.name)!.templateId;
+    showTemplate();
+  }
   $('duplicate').toggleAttribute('disabled', !mesh); $('delete').toggleAttribute('disabled', !mesh);
   describeSelection();
 }
@@ -243,11 +275,77 @@ scene.onPointerObservable.add(info => {
   const mesh = info.pickInfo?.pickedMesh;
   if (mesh instanceof Mesh && mesh.metadata?.worldId) select(mesh);
 });
+function chosenTemplate() { return world.templates.find(t => t.id === $<HTMLSelectElement>('template').value)!; }
+function showTemplate() {
+  const t = chosenTemplate();
+  if (!t) return;
+  $<HTMLInputElement>('template-name').value = t.name;
+  $<HTMLSelectElement>('template-kind').value = t.kind;
+  ['x', 'y', 'z'].forEach((axis, i) => { $<HTMLInputElement>(`template-${axis}`).value = String(t.size[i]); });
+  $<HTMLInputElement>('template-color').value = t.color;
+}
+function refreshTemplates() {
+  const select = $<HTMLSelectElement>('template'), previous = select.value;
+  select.replaceChildren(...world.templates.map(t => new Option(t.name, t.id)));
+  if (world.templates.some(t => t.id === previous)) select.value = previous;
+  showTemplate();
+}
+function rebuildKeepingSelection(id = selected?.name) {
+  cameraBoom.reset(); rebuild();
+  if (id) select(meshes.get(id) ?? null);
+}
+$('template').onchange = showTemplate;
+$('save-template').onclick = () => {
+  try {
+    syncObjects();
+    const t = chosenTemplate();
+    const candidate = structuredClone(world);
+    const updated: ObjectTemplate = {
+      id: t.id, name: $<HTMLInputElement>('template-name').value,
+      kind: $<HTMLSelectElement>('template-kind').value as Kind,
+      size: ['x', 'y', 'z'].map(axis => Number($<HTMLInputElement>(`template-${axis}`).value)) as Triple,
+      color: $<HTMLInputElement>('template-color').value,
+    };
+    candidate.templates[candidate.templates.findIndex(item => item.id === t.id)] = updated;
+    world = parseWorld(candidate); rebuildKeepingSelection(); markDirty();
+    notify('Шаблон обновлён. Индивидуальные изменения экземпляров сохранены.');
+  } catch (error) { notify(String(error)); }
+};
+$('delete-template').onclick = () => {
+  const t = chosenTemplate();
+  if (world.objects.some(o => o.templateId === t.id)) { notify('Шаблон используется. Сначала назначьте его экземплярам другой шаблон или удалите их.'); return; }
+  if (world.templates.length === 1) { notify('В каталоге должен остаться хотя бы один шаблон.'); return; }
+  world.templates = world.templates.filter(item => item.id !== t.id);
+  refreshTemplates(); markDirty();
+};
+$('assign-template').onclick = () => {
+  if (!selected) return;
+  syncObjects();
+  const o = world.objects.find(o => o.id === selected!.name)!;
+  o.templateId = chosenTemplate().id; delete o.size; delete o.color;
+  rebuildKeepingSelection(); markDirty();
+};
+$('reset-overrides').onclick = () => {
+  if (!selected) return;
+  syncObjects(); const o = world.objects.find(o => o.id === selected!.name)!;
+  delete o.size; delete o.color; rebuildKeepingSelection(); markDirty();
+};
+$('template-from-object').onclick = () => {
+  if (!selected) return;
+  if (world.templates.length >= 256) { notify('Лимит: 256 шаблонов.'); return; }
+  syncObjects(); const o = world.objects.find(o => o.id === selected!.name)!;
+  const name = prompt('Название нового шаблона:', `${chosenTemplate().name} — копия`);
+  if (name === null) return;
+  if (!name.trim() || name.length > 80) { notify('Название: от 1 до 80 символов.'); return; }
+  const p = objectProperties(world, o);
+  const t: ObjectTemplate = { id: crypto.randomUUID(), name: name.trim(), kind: p.kind, size: [...p.size], color: p.color };
+  world.templates.push(t); o.templateId = t.id; delete o.size; delete o.color;
+  rebuildKeepingSelection(); markDirty(); notify('Шаблон создан из выбранного объекта.');
+};
 $('add').onclick = () => {
-  const kind = $<HTMLSelectElement>('kind').value as Kind;
+  const t = chosenTemplate();
   const center = editorCamera.position.add(editorCamera.getForwardRay().direction.scale(18));
-  const size: Triple = kind === 'building' ? [8, 10, 8] : kind === 'ground' ? [16, 1, 16] : [3, 1, 3];
-  const o: WorldObject = { id: crypto.randomUUID(), kind, position: [Math.round(center.x), size[1] / 2 - (kind === 'ground' ? 1 : 0), Math.round(center.z)], size, yaw: 0, color: kind === 'obstacle' ? '#d4a663' : kind === 'ground' ? '#39484e' : '#9caba9' };
+  const o: WorldObject = { id: crypto.randomUUID(), templateId: t.id, position: [Math.round(center.x), t.kind === 'ground' ? -t.size[1] / 2 : t.size[1] / 2, Math.round(center.z)], yaw: 0 };
   if (world.objects.length >= 2000 || Math.abs(o.position[0]) > WORLD_LIMIT || Math.abs(o.position[2]) > WORLD_LIMIT) { notify('Лимит: 2000 объектов, координаты ±2048 м.'); return; }
   world.objects.push(o); select(addMesh(o)); markDirty();
 };
@@ -255,7 +353,7 @@ $('duplicate').onclick = () => {
   if (!selected || world.objects.length >= 2000) return;
   syncObjects();
   const source = world.objects.find(o => o.id === selected!.name)!;
-  const copy = structuredClone(source); copy.id = crypto.randomUUID(); copy.position[0] += copy.size[0] + 1;
+  const copy = structuredClone(source); copy.id = crypto.randomUUID(); copy.position[0] += objectProperties(world, copy).size[0] + 1;
   if (Math.abs(copy.position[0]) > WORLD_LIMIT) { notify('Объект выходит за границы карты.'); return; }
   world.objects.push(copy); select(addMesh(copy)); markDirty();
 };
