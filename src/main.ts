@@ -11,7 +11,6 @@ import { Color3, Color4 } from '@babylonjs/core/Maths/math.color.js';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
 import { GizmoManager } from '@babylonjs/core/Gizmos/gizmoManager.js';
 import { ImportMeshAsync } from '@babylonjs/core/Loading/sceneLoader.js';
-import type { AnimationGroup } from '@babylonjs/core/Animations/animationGroup.js';
 import '@babylonjs/core/Collisions/collisionCoordinator.js';
 import '@babylonjs/core/Culling/ray.js';
 import '@babylonjs/loaders/glTF/2.0/glTFLoader.js';
@@ -19,6 +18,7 @@ import { CELL_SIZE, cellAt, createWorld, parseWorld, WORLD_LIMIT } from './world
 import type { Kind, Triple, WorldData, WorldObject } from './world';
 import { initialPlayerState, stepPlayer } from './player';
 import { FollowCamera, MIN_CAMERA_DISTANCE } from './followCamera';
+import { AnimationBlend } from './animationBlend';
 import './style.css';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
@@ -122,9 +122,7 @@ const visual = new TransformNode('player-visual', scene);
 visual.parent = player;
 const fallback = MeshBuilder.CreateCapsule('loading-avatar', { height: 1.8, radius: 0.3 }, scene);
 fallback.position.y = 0.9; fallback.parent = visual; fallback.isPickable = false; fallback.material = material('#d4a663');
-let animations: AnimationGroup[] = [];
-let activeAnimation: AnimationGroup | undefined;
-let animationState = '';
+let animationBlend: AnimationBlend | undefined;
 async function loadCharacter() {
   try {
     const result = await ImportMeshAsync(`${import.meta.env.BASE_URL}models/character.glb`, scene);
@@ -138,8 +136,7 @@ async function loadCharacter() {
     root.position.y = -bounds.min.y * 1.8 / height;
     root.parent = visual;
     for (const mesh of result.meshes) { mesh.isPickable = false; mesh.checkCollisions = false; }
-    animations = result.animationGroups;
-    for (const a of animations) a.stop();
+    animationBlend = new AnimationBlend(result.animationGroups);
     fallback.dispose();
     notify(startupMessage || 'Готово. WASD — идти · Tab — редактировать');
   } catch (error) {
@@ -330,12 +327,9 @@ function simulate(dt: number) {
   }
   if (player.position.y < -30) respawn();
 }
-function animate() {
+function animate(dt: number) {
   const state = !playerState.grounded ? 'Jump_Loop' : playerState.moving ? playerState.running ? 'Sprint_Loop' : 'Walk_Loop' : 'Idle_Loop';
-  if (state === animationState || !animations.length) return;
-  animationState = state;
-  activeAnimation?.stop(); activeAnimation = animations.find(a => a.name === state);
-  activeAnimation?.start(true, 1);
+  animationBlend?.update(state, dt);
 }
 rebuild(); configureGizmos(); watchGizmos(); respawn();
 void loadCharacter();
@@ -347,7 +341,7 @@ engine.runRenderLoop(() => {
     accumulator += dt;
     while (accumulator >= 1 / 60) { simulate(1 / 60); accumulator -= 1 / 60; }
     camera.target.copyFrom(player.position).addInPlaceFromFloats(0, 1.15, 0);
-    animate();
+    animate(dt);
     const cell = cellAt(player.position.x, player.position.z);
     if (cell !== activeCell) {
       activeCell = cell;
