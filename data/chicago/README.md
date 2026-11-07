@@ -81,3 +81,5 @@ Architectural reference sources:
 
 Generated building anchors snap to 1 m in X/Z, dimensions to 0.25 m and yaw to 15°.
 The Y centre is half the snapped height, keeping the base at street level. Procedural street contours retain their own geometric precision.
+
+Untyped, unnamed elevated `building=yes` structures without height or levels are omitted rather than turned into estimated ground-level towers. OSM `layer` is not a metric elevation.

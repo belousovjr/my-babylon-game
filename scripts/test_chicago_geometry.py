@@ -67,3 +67,14 @@ class StreetGeometryTests(unittest.TestCase):
             point=Point(x,z)
             self.assertGreater(river.distance(point),20)
             self.assertTrue(ground.covers(point),'small plaza pools must leave the ground intact')
+
+    def test_untyped_elevated_structures_do_not_become_estimated_towers(self):
+        self.assertTrue(city.unsupported_elevated_building(dict(building='yes',layer='3')))
+        for tags in [dict(building='yes'),dict(building='office',layer='1'),
+                     dict(building='yes',layer='3',height='20'),
+                     dict(building='yes',layer='3',name='Named building'),
+                     {'building':'yes','layer':'3','building:levels':'4'}]:
+            self.assertFalse(city.unsupported_elevated_building(tags))
+        import json
+        objects=json.loads((Path(__file__).resolve().parents[1]/'src/generated/chicago.json').read_text())['world']['objects']
+        self.assertFalse({'osm-w1175853280','osm-w1175853281'} & {o['id'] for o in objects})

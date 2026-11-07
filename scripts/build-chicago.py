@@ -41,6 +41,11 @@ def street_surfaces(roads,bounds):
     pavement=set_precision(asphalt.buffer(3.2,join_style=3).intersection(bounds),0.01)
     return asphalt,pavement.difference(asphalt),pavement
 
+def unsupported_elevated_building(t):
+    # Layer is ordering, not metres: do not invent ground-level towers for untyped elevated structures.
+    return (number(t.get('layer'))>0 and t.get('building')=='yes'
+            and not t.get('name') and not number(t.get('height')) and not number(t.get('building:levels')))
+
 def main():
     nodes,ways,relations={},{},{}
     files=glob.glob(str(ROOT/'data/chicago/osm-*.xml'))+glob.glob(str(ROOT/'data/chicago/river-*.xml'))
@@ -119,6 +124,7 @@ def main():
     templates=[dict(id=p,name=n,kind='building' if p not in ['tree','lamp'] else 'obstacle',size=s,color=c,profile=p,lodDistances=d) for p,n,s,c,d in specs]
     objects=[]; source=[]; heights=Counter(); families=Counter(); seen_ids=Counter()
     for wid,t,p in buildings:
+        if unsupported_elevated_building(t):continue
         if p.geom_type=='MultiPolygon':p=max(p.geoms,key=lambda v:v.area)
         if p.area<90:continue
         center=p.centroid
