@@ -14,7 +14,7 @@ export function buildArchitecture(template: ObjectTemplate, scene: Scene, materi
     const pieces: Mesh[] = [], accents: Mesh[] = [];
     const part = (x: number, y: number, z: number, w: number, h: number, d: number, shade = 1, round: boolean | 'sphere' = false) => {
       const mesh = round === 'sphere' ? MeshBuilder.CreateSphere('part', { diameter: 1, segments: 4 }, scene) : round
-        ? MeshBuilder.CreateCylinder('part', { diameter: 1, height: 1, tessellation: detail === 0 ? 12 : 8 }, scene)
+        ? MeshBuilder.CreateCylinder('part', { diameter: 1, height: 1, tessellation: detail === 0 ? 12 : profile === 'marina' && detail >= 2 ? 6 : 8 }, scene)
         : MeshBuilder.CreateBox('part', { size: 1 }, scene);
       mesh.scaling.set(w, h, d); mesh.position.set(x, y, z);
       mesh.setVerticesData('color', Array.from({ length: mesh.getTotalVertices() }, () => [shade, shade, shade, 1]).flat());
@@ -42,7 +42,7 @@ export function buildArchitecture(template: ObjectTemplate, scene: Scene, materi
       part(0.08, 0.47, 0, 0.015, 0.06, 0.015, 1.3);
     } else if (profile === 'marina') {
       part(0, -0.03, 0, 0.78, 0.94, 0.78, 0.75, true);
-      const rings = detail === 0 ? 18 : detail === 1 ? 8 : 2;
+      const rings = 18;
       for (let i = 0; i < rings; i++) part(0, -0.46 + i * 0.9 / rings, 0, 1, 0.015, 1, 1.15, true);
       part(0, 0.46, 0, 0.8, 0.08, 0.8, 1, true);
     } else if (profile === 'clock' || profile === 'gothic') {

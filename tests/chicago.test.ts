@@ -152,3 +152,23 @@ test('rail bridge truss uprights are present between the lower and upper chords'
   }
   scene.dispose();engine.dispose();
 });
+
+
+test('Marina tower LOD preserves every balcony ring while reducing radial detail', () => {
+  const engine=new NullEngine(),scene=new Scene(engine),mat=new StandardMaterial('tower',scene);
+  const template=createWorld().templates.find(t=>t.profile==='marina')!;
+  const levels=buildArchitecture(template,scene,mat,mat);
+  const ringHeights=levels.map(level=>{
+    const positions=level.getVerticesData('position')!;
+    const heights=new Set<number>();
+    for(let i=0;i<positions.length;i+=3) {
+      if(Math.hypot(positions[i]!,positions[i+2]!)>.49) heights.add(Math.round(positions[i+1]!*1e6));
+    }
+    return [...heights].sort((a,b)=>a-b);
+  });
+  assert.equal(ringHeights[0].length,36,'all eighteen rings have top and bottom faces');
+  for(const heights of ringHeights) assert.deepEqual(heights,ringHeights[0]);
+  const triangles=levels.map(level=>level.getTotalIndices()/3);
+  assert.ok(triangles.every((count,i)=>i===0||count<triangles[i-1]!));
+  scene.dispose();engine.dispose();
+});
