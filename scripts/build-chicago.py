@@ -141,7 +141,10 @@ def main():
         h=max(6,min(600,h));families[profile]+=1;heights[method]+=1
         seen_ids[wid]+=1
         unique_id=wid if seen_ids[wid]==1 else f'{wid}-{seen_ids[wid]}'
-        o=dict(id=f'osm-{unique_id}',templateId=profile,name=name or t.get('addr:street','Chicago building'),position=[rounded(rect.centroid.x),rounded(h/2),rounded(rect.centroid.y)],size=[rounded(w),rounded(h),rounded(d)],yaw=round(yaw,6))
+        # Snap the footprint anchor; the vertical centre follows half-height to keep the base at zero.
+        w,d,h=[round(value*4)/4 for value in [w,d,h]]
+        yaw=round(yaw/(math.pi/12))*(math.pi/12)
+        o=dict(id=f'osm-{unique_id}',templateId=profile,name=name or t.get('addr:street','Chicago building'),position=[round(rect.centroid.x),h/2,round(rect.centroid.y)],size=[w,h,d],yaw=yaw)
         objects.append(o)
         source.append(dict(id=wid,name=name,height=rounded(h),heightSource=method,profile=profile,footprint=[[rounded(x),rounded(z)] for x,z in p.exterior.coords]))
     road_union,sidewalks,pavement=street_surfaces(roads,bounds)
@@ -159,7 +162,7 @@ def main():
     riverwalk=water.buffer(7).difference(water).intersection(bounds)
     # A usable spawn on State Street, south of the river, outside building bounds.
     spawn=project(-87.6278,41.8865)
-    world=dict(version=3,environment='chicago-loop',spawn=[rounded(spawn[0]),1,rounded(spawn[1])],templates=templates,objects=objects)
+    world=dict(version=3,environment='chicago-loop',spawn=[round(spawn[0]),1,round(spawn[1])],templates=templates,objects=objects)
     curbs=road_union.buffer(0.22,join_style=3).difference(road_union).intersection(sidewalks)
     terrace_lines=[[[rounded(x),rounded(z)] for x,z in p.exterior.simplify(2).coords] for p in (list(river_buffer.geoms) if hasattr(river_buffer,'geoms') else [river_buffer]) if p.geom_type=='Polygon']
     ramps=[]

@@ -78,3 +78,6 @@ Architectural reference sources:
 - Wrigley Building (Chicago Architecture Center): https://www.architecture.org/online-resources/buildings-of-chicago/wrigley-building/
 - Tribune Tower (Chicago Architecture Center): https://www.architecture.org/online-resources/buildings-of-chicago/tribune-tower/
 - Riverwalk vertical arrangement: https://www.rudybruneraward.org/wp-content/uploads/2017/06/Chicago_Riverwalk_FULL.pdf
+
+Generated building anchors snap to 1 m in X/Z, dimensions to 0.25 m and yaw to 15°.
+The Y centre is half the snapped height, keeping the base at street level. Procedural street contours retain their own geometric precision.

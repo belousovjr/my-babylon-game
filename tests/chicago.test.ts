@@ -55,3 +55,14 @@ test('procedural streets have upward floors and walkable spawn without one objec
   }
   scene.dispose();engine.dispose();
 });
+
+test('generated buildings follow editor grid and remain grounded', () => {
+  for(const o of createWorld().objects) {
+    assert.equal(o.position[0],Math.round(o.position[0]),`${o.id}: X`);
+    assert.equal(o.position[2],Math.round(o.position[2]),`${o.id}: Z`);
+    for(const n of o.size!) assert.ok(Math.abs(n*4-Math.round(n*4))<1e-8,`${o.id}: size`);
+    const angle=o.yaw/(Math.PI/12);
+    assert.ok(Math.abs(angle-Math.round(angle))<1e-8,`${o.id}: rotation`);
+    assert.equal(o.position[1]-o.size![1]/2,0,`${o.id}: base stays on ground`);
+  }
+});
