@@ -1,0 +1,35 @@
+import { strict as assert } from 'node:assert';
+import { test } from 'node:test';
+import { NullEngine } from '@babylonjs/core/Engines/nullEngine.js';
+import { Scene } from '@babylonjs/core/scene.js';
+import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
+import '@babylonjs/core/Collisions/collisionCoordinator.js';
+import '@babylonjs/core/Culling/ray.js';
+import { initialPlayerState, stepPlayer } from '../src/player.ts';
+
+// Node resolves exact package paths; the application imports use .js too.
+test('fixed-step movement normalizes diagonals, walls block, jump lands without falling through', () => {
+  const engine = new NullEngine(); const scene = new Scene(engine);
+  scene.collisionsEnabled = true;
+  const ground = MeshBuilder.CreateBox('ground', {width:100, height:1, depth:100}, scene);
+  ground.position.y = -0.5; ground.checkCollisions = true; ground.metadata = {worldId:'ground'};
+  const wall = MeshBuilder.CreateBox('wall', {width:10,height:5,depth:1}, scene);
+  wall.position.set(0,2.5,5); wall.checkCollisions = true; wall.metadata = {worldId:'wall'};
+  const body = MeshBuilder.CreateBox('player',{},scene); body.isPickable=false;
+  body.ellipsoid.set(0.35,0.9,0.35); body.ellipsoidOffset.set(0,0.9,0);
+  const input = {x:0,z:0,yaw:-Math.PI/2,run:false,jump:false};
+  let state = initialPlayerState(); body.position.set(0,1,0);
+  const step = (n=1) => { for(let i=0;i<n;i++) { scene.meshes.forEach(m=>m.computeWorldMatrix(true)); stepPlayer(scene,body,state,input,1/60); } };
+  step(90); assert.ok(Math.abs(body.position.y)<0.05); assert.equal(state.grounded,true);
+  input.z=1; step(180); assert.ok(body.position.z<4.2 && body.position.z>3.9,`wall: ${body.position.z}`);
+  body.position.set(20,0.01,0); input.x=1; step(60);
+  assert.ok(Math.abs(Math.hypot(body.position.x-20,body.position.z)-3.2)<0.05);
+  input.x=0;input.z=0; input.jump=true;step(); input.jump=false;step(15);
+  assert.ok(body.position.y>0.8,'jump rises');
+  const before=state.verticalSpeed;input.jump=true;step();input.jump=false;
+  assert.ok(state.verticalSpeed<before,'no double jump');
+  step(90);assert.ok(Math.abs(body.position.y)<0.05,'lands'); assert.equal(state.grounded,true);
+  state=initialPlayerState();body.position.set(20,0.01,0);input.z=1;input.run=true;step(60);
+  assert.ok(Math.abs(body.position.z-7)<0.05,'run speed');
+  scene.dispose();engine.dispose();
+});
