@@ -192,3 +192,12 @@ two versions cannot appear together. Render visibility does not disable collisio
 geometry. Lamps simplify their poles and disappear at 120 m; signal heads omit
 inactive lenses at low LOD and disappear at 160 m. Selected editable objects
 remain visible for manual LOD preview.
+
+
+Gameplay broad-phase queries cache nearby collision meshes rather than scanning all
+render meshes per simulation step. Ground rays and Babylon moveWithCollisions share
+the same surroundingMeshes list; the follow camera has a separate range-aware list.
+Lists refresh after 4 m of travel or increased camera range, with an 8 m safety
+margin. Rebuilds, editor changes, respawns and cell activation invalidate them;
+cell activation precedes physics at the destination. This cache assumes the current
+static city; moving obstacles must invalidate it or join a separate dynamic list.

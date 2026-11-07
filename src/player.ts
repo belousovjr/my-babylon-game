@@ -1,5 +1,6 @@
 import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
 import { Ray } from '@babylonjs/core/Culling/ray.js';
+import type { AbstractMesh } from '@babylonjs/core/Meshes/abstractMesh.js';
 import type { Mesh } from '@babylonjs/core/Meshes/mesh.js';
 import type { Scene } from '@babylonjs/core/scene.js';
 
@@ -17,8 +18,13 @@ export function stepPlayer(scene: Scene, body: Mesh, state: PlayerState, input: 
   state.moving = direction.lengthSquared() > 0;
   state.running = state.moving && input.run;
   if (state.moving) direction.normalize();
-  const hit = scene.pickWithRay(new Ray(body.position.add(new Vector3(0, 0.12, 0)), Vector3.Down(), 0.22), m => m.checkCollisions && (m.collisionGroup & body.collisionMask) !== 0 && !!m.metadata?.worldId && m.isEnabled());
-  state.grounded = !!hit?.hit && state.verticalSpeed <= 0;
+  const groundRay = new Ray(body.position.add(new Vector3(0, 0.12, 0)), Vector3.Down(), 0.22);
+  const isGround = (m: AbstractMesh) => m.checkCollisions && (m.collisionGroup & body.collisionMask) !== 0 && !!m.metadata?.worldId && m.isEnabled();
+  const candidates = body.surroundingMeshes;
+  const onGround = candidates
+    ? candidates.some(m => isGround(m) && groundRay.intersectsMesh(m, true).hit)
+    : !!scene.pickWithRay(groundRay, m => isGround(m))?.hit;
+  state.grounded = onGround && state.verticalSpeed <= 0;
   if (state.grounded) state.verticalSpeed = -0.5;
   if (input.jump && state.grounded) { state.verticalSpeed = 7; state.grounded = false; }
   state.verticalSpeed = Math.max(-30, state.verticalSpeed - 20 * dt);

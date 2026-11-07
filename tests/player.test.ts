@@ -8,6 +8,7 @@ import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
 import '@babylonjs/core/Collisions/collisionCoordinator.js';
 import '@babylonjs/core/Culling/ray.js';
 import { attachCollisionGeometry, buildArchitecture, createCollisionPrototype } from '../src/architecture.ts';
+import { NearbyMeshes } from '../src/nearbyMeshes.ts';
 import { initialPlayerState, stepPlayer } from '../src/player.ts';
 
 // Node resolves exact package paths; the application imports use .js too.
@@ -22,7 +23,8 @@ test('fixed-step movement normalizes diagonals, walls block, jump lands without 
   body.ellipsoid.set(0.35,0.9,0.35); body.ellipsoidOffset.set(0,0.9,0);
   const input = {x:0,z:0,yaw:-Math.PI/2,run:false,jump:false};
   let state = initialPlayerState(); body.position.set(0,1,0);
-  const step = (n=1) => { for(let i=0;i<n;i++) { scene.meshes.forEach(m=>m.computeWorldMatrix(true)); stepPlayer(scene,body,state,input,1/60); } };
+  const nearby=new NearbyMeshes();nearby.setSources([ground,wall]);
+  const step = (n=1) => { for(let i=0;i<n;i++) { scene.meshes.forEach(m=>m.computeWorldMatrix(true)); body.surroundingMeshes=nearby.get(body.position,12); stepPlayer(scene,body,state,input,1/60); } };
   step(90); assert.ok(Math.abs(body.position.y)<0.05); assert.equal(state.grounded,true);
   input.z=1; step(180); assert.ok(body.position.z<4.2 && body.position.z>3.9,`wall: ${body.position.z}`);
   body.position.set(20,0.01,0); input.x=1; step(60);
@@ -114,4 +116,25 @@ test('shared collision geometry blocks facades, tree trunks and lamps independen
     assert.ok(collider.isDisposed(),'deleting the object also deletes its collider');
     scene.dispose();engine.dispose();
   }
+});
+
+
+test('cached ground checks do not fall back to a scene-wide pick, including empty neighborhoods', () => {
+  const engine=new NullEngine(),scene=new Scene(engine);
+  scene.collisionsEnabled=true;
+  const ground=MeshBuilder.CreateBox('ground',{width:20,height:1,depth:20},scene);
+  ground.position.y=-.5;ground.checkCollisions=true;ground.isVisible=false;ground.metadata={worldId:'ground'};
+  ground.computeWorldMatrix(true);
+  const body=MeshBuilder.CreateBox('player',{},scene);
+  body.ellipsoid.set(.35,.9,.35);body.ellipsoidOffset.set(0,.9,0);
+  body.position.y=.01;body.surroundingMeshes=[ground];
+  scene.pickWithRay=()=>{throw new Error('unexpected whole-scene ground scan');};
+  const state=initialPlayerState(),input={x:0,z:0,yaw:0,run:false,jump:false};
+  stepPlayer(scene,body,state,input,1/60);
+  assert.equal(state.grounded,true);
+  body.position.set(100,10,100);body.surroundingMeshes=[];
+  stepPlayer(scene,body,state,input,1/60);
+  assert.equal(state.grounded,false);
+  assert.ok(body.position.y<10,'falls normally after teleporting off the ground');
+  scene.dispose();engine.dispose();
 });

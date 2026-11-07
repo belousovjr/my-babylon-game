@@ -17,6 +17,7 @@ import '@babylonjs/loaders/glTF/2.0/glTFLoader.js';
 import { CELL_SIZE, cellAt, createWorld, parseWorld, objectProperties, setObjectSize, WORLD_LIMIT, MAX_SIZE } from './world';
 import type { Kind, ObjectTemplate, Triple, WorldData, WorldObject } from './world';
 import { initialPlayerState, stepPlayer } from './player';
+import { NearbyMeshes } from './nearbyMeshes';
 import { FollowCamera, MIN_CAMERA_DISTANCE } from './followCamera';
 import { attachCollisionGeometry, buildArchitecture, createCollisionPrototype, PROFILES } from './architecture';
 import type { Profile } from './architecture';
@@ -137,6 +138,7 @@ function material(hex: string, priority = 0) {
   }
   return mat;
 }
+const playerNeighborhood = new NearbyMeshes(), cameraNeighborhood = new NearbyMeshes();
 const meshes = new Map<string, Mesh>();
 const templateMeshes = new Map<string, Mesh[]>();
 const modelLevels = new Map<Mesh, InstancedMesh[]>();
@@ -152,6 +154,10 @@ try {
   const saved = localStorage.getItem('block-district-chicago-v3');
   if (saved) world = parseWorld(JSON.parse(saved));
 } catch { startupMessage = 'Сохранённая карта недоступна. Открыт Chicago Loop.'; }
+function refreshNearbySources() {
+  playerNeighborhood.setSources(scene.meshes.filter((mesh): mesh is Mesh => mesh instanceof Mesh && mesh.checkCollisions && (mesh.collisionGroup & player.collisionMask) !== 0 && !!mesh.metadata?.worldId));
+  cameraNeighborhood.setSources([...meshes.values(), ...proceduralMeshes].filter(mesh => mesh.checkCollisions));
+}
 function updateCellCoverage(mesh: Mesh) {
   mesh.computeWorldMatrix(true);
   for (const child of mesh.getChildMeshes()) if (child.metadata?.collisionOnly) child.computeWorldMatrix(true);
@@ -236,6 +242,7 @@ function rebuild() {
     }
   }
   updateLODs();
+  refreshNearbySources();
 }
 const player = MeshBuilder.CreateBox('player-collider', { size: 1 }, scene);
 player.isVisible = false; player.isPickable = false;
@@ -293,6 +300,7 @@ function syncObjects() {
     o.yaw = Math.atan2(Math.sin(yaw), Math.cos(yaw));
     updateCellCoverage(mesh);
   }
+  refreshNearbySources();
 }
 function describeSelection() {
   if (!selected) { $('selection').textContent = 'Выберите объект в сцене'; return; }
@@ -345,9 +353,26 @@ function watchGizmos() {
     }
   }
 }
+function updateActiveCell() {
+  if (editing) return;
+  const cell = cellAt(player.position.x, player.position.z);
+  if (cell !== activeCell) {
+    activeCell = cell;
+    const [cx, cz] = cell.split(',').map(Number);
+    // shortcut: cells only toggle existing meshes; load/unload assets when the map outgrows memory.
+    for (const m of meshes.values()) {
+      const b = m.metadata;
+      m.setEnabled((b.minCellX <= cx! + 2 && b.maxCellX >= cx! - 2 && b.minCellZ <= cz! + 2 && b.maxCellZ >= cz! - 2) || m.scaling.y > 120);
+    }
+    playerNeighborhood.invalidate(); cameraNeighborhood.invalidate();
+  }
+}
 function respawn() {
+  playerNeighborhood.invalidate(); cameraNeighborhood.invalidate();
+  player.surroundingMeshes = null;
   cameraBoom.reset();
   player.position.copyFromFloats(...world.spawn); playerState = initialPlayerState(); jumpQueued = false;
+  updateActiveCell();
   camera.target.copyFrom(player.position).addInPlaceFromFloats(0, 1.1, 0);
 }
 function setMode() {
@@ -535,6 +560,7 @@ canvas.addEventListener('contextmenu', event => event.preventDefault());
 canvas.addEventListener('pointerdown', () => canvas.focus());
 
 function simulate(dt: number) {
+  updateActiveCell();
   const input = {
     x: Number(keys.has('KeyD')) - Number(keys.has('KeyA')),
     z: Number(keys.has('KeyW')) - Number(keys.has('KeyS')),
@@ -543,6 +569,7 @@ function simulate(dt: number) {
     jump: jumpQueued,
   };
   jumpQueued = false;
+  player.surroundingMeshes = playerNeighborhood.get(player.position, 12);
   stepPlayer(scene, player, playerState, input, dt);
   if (playerState.moving) {
     $('intro').hidden = true;
@@ -567,21 +594,12 @@ engine.runRenderLoop(() => {
     while (accumulator >= 1 / 60) { simulate(1 / 60); accumulator -= 1 / 60; }
     camera.target.copyFrom(player.position).addInPlaceFromFloats(0, 1.15, 0);
     animate(dt);
-    const cell = cellAt(player.position.x, player.position.z);
-    if (cell !== activeCell) {
-      activeCell = cell;
-      const [cx, cz] = cell.split(',').map(Number);
-      // shortcut: cells only toggle existing meshes; load/unload assets when the map outgrows memory.
-      for (const m of meshes.values()) {
-        const b = m.metadata;
-        m.setEnabled((b.minCellX <= cx! + 2 && b.maxCellX >= cx! - 2 && b.minCellZ <= cz! + 2 && b.maxCellZ >= cz! - 2) || m.scaling.y > 120);
-      }
-    }
+
   } else { accumulator = 0; }
   if (!editing) {
     // The orbit camera owns input/desired zoom; the render camera owns the collision-safe pose.
     camera.update();
-    cameraBoom.update(camera.target, camera.position, [...meshes.values(), ...proceduralMeshes], dt);
+    cameraBoom.update(camera.target, camera.position, cameraNeighborhood.get(camera.target, Vector3.Distance(camera.target, camera.position) + 3), dt);
     followCamera.position.copyFrom(cameraBoom.position);
     followCamera.setTarget(camera.target);
   }
