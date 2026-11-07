@@ -10,6 +10,7 @@ from shapely.ops import unary_union, polygonize, linemerge
 from shapely import constrained_delaunay_triangles, set_precision
 from shapely.geometry.polygon import orient
 from shapely.affinity import rotate, translate
+from shapely.prepared import prep
 
 ROOT=Path(__file__).resolve().parents[1]
 LON,LAT=-87.63075,41.88425
@@ -65,23 +66,44 @@ def railway_geometry(lines,bounds,water):
             if not unsupported_water.covers(point): supports.append([point.x,point.y])
     return dict(deck=triangles(deck),edges=rings(deck),rails=triangles(rails),railEdges=rings(rails),supports=supports)
 
-def fit_rail_clearance(o,corridor):
-    w,h,d=o['size'];x,y,z=o['position']
-    local=rotate(translate(corridor,-x,-z),o['yaw'],origin=(0,0),use_radians=True)
-    footprint=box(-w/2,-d/2,w/2,d/2)
-    overlap=footprint.intersection(local)
-    if overlap.area<1e-6:return o
-    a,b,c,e=overlap.bounds
-    candidates=[(-w/2,-d/2,a-1,d/2),(c+1,-d/2,w/2,d/2),(-w/2,-d/2,w/2,b-1),(-w/2,e+1,w/2,d/2)]
-    for left,bottom,right,top in sorted(candidates,key=lambda v:max(0,v[2]-v[0])*max(0,v[3]-v[1]),reverse=True):
-        width,depth=math.floor((right-left)*4)/4,math.floor((top-bottom)*4)/4
+def building_footprint(o):
+    w,_,d=o['size'];x,_,z=o['position']
+    # Include the largest architectural trim (1.03 times the collision footprint).
+    return translate(rotate(box(-w*.515,-d*.515,w*.515,d*.515),-o['yaw'],origin=(0,0),use_radians=True),x,z)
+
+def fit_building(o,land):
+    original=building_footprint(o)
+    if land.covers(original):return o
+    space=land.intersection(original)
+    polygons=list(space.geoms) if hasattr(space,'geoms') else [space]
+    polygons=[p for p in polygons if p.geom_type=='Polygon' and p.area>=25]
+    if not polygons:return None
+    parcel=max(polygons,key=lambda p:p.area)
+    points=[parcel.centroid,parcel.representative_point()]
+    centres=[(o['position'][0],o['position'][2]),*[(round(p.x),round(p.y)) for p in points]]
+    w,h,d=o['size']
+    sizes={(math.floor(w*a/20*4)/4,math.floor(d*b/20*4)/4) for a in range(7,21) for b in range(7,21)}
+    for width,depth in sorted(sizes,key=lambda size:(size[0]*size[1],size),reverse=True):
         if min(width,depth)<5 or width*depth<w*d*.25:continue
-        cx,cz=(left+right)/2,(bottom+top)/2
-        nx=round(x+cx*math.cos(o['yaw'])+cz*math.sin(o['yaw']))
-        nz=round(z-cx*math.sin(o['yaw'])+cz*math.cos(o['yaw']))
-        fitted=translate(rotate(box(-width/2,-depth/2,width/2,depth/2),-o['yaw'],origin=(0,0),use_radians=True),nx,nz)
-        if fitted.intersection(corridor).area<1e-6:return dict(o,position=[nx,y,nz],size=[width,h,depth])
+        for x,z in centres:
+            fitted=dict(o,position=[x,h/2,z],size=[width,h,depth])
+            if space.covers(building_footprint(fitted)):return fitted
     return None
+
+def fit_landmark_group(objects,land,identical=False):
+    # Preserve composition: one translation and one horizontal scale for the whole group.
+    allowed=prep(land)
+    offsets=sorted(((x,z) for x in range(-32,33) for z in range(-32,33)),key=lambda p:(p[0]**2+p[1]**2,p))
+    if identical:
+        diameter=math.floor(min(min(o['size'][0],o['size'][2]) for o in objects)*4)/4
+        objects=[dict(o,size=[diameter,max(v['size'][1] for v in objects),diameter],yaw=0) for o in objects]
+    for step in range(20,9,-1):
+        candidates=[dict(o,size=[math.floor(o['size'][0]*step/20*4)/4,o['size'][1],math.floor(o['size'][2]*step/20*4)/4]) for o in objects]
+        footprint=unary_union([building_footprint(o) for o in candidates])
+        for dx,dz in offsets:
+            if allowed.covers(translate(footprint,dx,dz)):
+                return [dict(o,position=[o['position'][0]+dx,o['size'][1]/2,o['position'][2]+dz]) for o in candidates]
+    raise RuntimeError('Cannot preserve landmark group within 32 m: '+', '.join(o['id'] for o in objects))
 
 def unsupported_elevated_building(t):
     # Layer is ordering, not metres: do not invent ground-level towers for untyped elevated structures.
@@ -150,6 +172,14 @@ def main():
                 roads.append({'id':f'osm-{wid}','name':t.get('name',''),'width':rounded(width),'bridge':t.get('bridge') in ['yes','movable'] or line.intersects(water),'points':[[rounded(x),rounded(z)] for x,z in line.simplify(1).coords]})
     railway=railway_geometry(rails,bounds,water)
     rail_clearance=unary_union([Polygon(t) for t in railway['deck']]).buffer(1.5)
+    road_union,sidewalks,pavement=street_surfaces(roads,bounds)
+    pavement=pavement.union(road_union)
+    sidewalks=pavement.difference(road_union)
+    water=snap_outline(water.simplify(0.5,preserve_topology=True))
+    river_buffer=snap_outline(water.buffer(7,join_style=3))
+    exposed_ground=bounds.difference(river_buffer).difference(pavement)
+    building_land=exposed_ground.difference(rail_clearance)
+    fitted_count=skipped_count=0
     specs=[
       ('glass','Стеклянная офисная башня',[32,100,32],'#759ca8',[180,650]),
       ('stone','Чикагская школа · каменный корпус',[36,55,30],'#b8ac91',[130,500]),
@@ -164,6 +194,7 @@ def main():
     ]
     templates=[dict(id=p,name=n,kind='building' if p not in ['tree','lamp'] else 'obstacle',size=s,color=c,profile=p,lodDistances=d) for p,n,s,c,d in specs]
     objects=[]; source=[]; heights=Counter(); families=Counter(); seen_ids=Counter()
+    records=[]
     for wid,t,p in buildings:
         if unsupported_elevated_building(t):continue
         if p.geom_type=='MultiPolygon':p=max(p.geoms,key=lambda v:v.area)
@@ -192,16 +223,32 @@ def main():
         w,d,h=[round(value*4)/4 for value in [w,d,h]]
         yaw=round(yaw/(math.pi/12))*(math.pi/12)
         o=dict(id=f'osm-{unique_id}',templateId=profile,name=name or t.get('addr:street','Chicago building'),position=[round(rect.centroid.x),h/2,round(rect.centroid.y)],size=[w,h,d],yaw=yaw)
-        o=fit_rail_clearance(o,rail_clearance)
-        if o is None:continue
-        families[profile]+=1;heights[method]+=1
-        objects.append(o)
-        source.append(dict(id=wid,name=name,height=rounded(h),heightSource=method,profile=profile,footprint=[[rounded(x),rounded(z)] for x,z in p.exterior.coords]))
-    road_union,sidewalks,pavement=street_surfaces(roads,bounds)
-    pavement=pavement.union(road_union)
-    sidewalks=pavement.difference(road_union)
-    water=snap_outline(water.simplify(0.5,preserve_topology=True))
-    river_buffer=snap_outline(water.buffer(7,join_style=3))
+        records.append(dict(object=o,protected=method=='landmark-reference' or profile=='deco' or h>=150,method=method,
+                            source=dict(id=wid,name=name,height=rounded(h),heightSource=method,profile=profile,footprint=[[rounded(x),rounded(z)] for x,z in p.exterior.coords])))
+    groups=defaultdict(list)
+    for record in records:
+        o=record['object']
+        if record['protected']:
+            # Repeated Marina profiles form an identical ensemble; other landmarks retain their own proportions.
+            key=('identical',o['templateId']) if o['templateId']=='marina' else ('single',o['id'])
+            groups[key].append(record)
+    protected_ids=[]
+    for key,group in sorted(groups.items(),key=lambda pair:(pair[0][0]!='identical',pair[0])):
+        fitted=fit_landmark_group([r['object'] for r in group],building_land,key[0]=='identical')
+        for record,o in zip(group,fitted):
+            record['fitted']=o
+            protected_ids.append(o['id'])
+        building_land=building_land.difference(unary_union([building_footprint(o).buffer(0.5) for o in fitted]))
+    for record in records:
+        original=record['object']
+        o=record.get('fitted') if record['protected'] else fit_building(original,building_land)
+        if o is None:
+            skipped_count+=1
+            continue
+        if o!=original:fitted_count+=1
+        assert exposed_ground.covers(building_footprint(o)), f"Unsupported building: {o['id']}"
+        families[o['templateId']]+=1;heights[record['method']]+=1
+        objects.append(o);source.append(record['source'])
     # Carry the structural slab across the lowered bank terrace and into solid ground.
     bridge=pavement.intersection(river_buffer.buffer(2,join_style=3))
     abutments=pavement.intersection(water.buffer(2,join_style=3).difference(water))
@@ -209,7 +256,6 @@ def main():
     rail_lines=list(bridge_rails.geoms) if hasattr(bridge_rails,'geoms') else [bridge_rails]
 
     # No almost-coplanar ground beneath paving: it flickers through at overview distances.
-    exposed_ground=bounds.difference(river_buffer).difference(pavement)
     assert exposed_ground.intersection(pavement).area<1e-6
     # Triangulate first, then batch: cutting polygons at cell borders introduces extra seam vertices.
     terrain_cells=defaultdict(list)
@@ -240,7 +286,7 @@ def main():
         if water.contains(Point(mx+nx*2,mz+nz*2)):nx,nz=-nx,-nz
         ramps.append({'top':[rounded(mx+nx*8),0.17,rounded(mz+nz*8)],'bottom':[rounded(mx+dx/length*32+nx*3),-3.78,rounded(mz+dz/length*32+nz*3)]})
     env=dict(railway=railway,roadSurface=triangles(road_union),sidewalks=triangles(sidewalks),curbs=triangles(curbs),pavingEdges=paving_edges,terraceWalls=terrace_lines,ramps=ramps,origin=[LON,LAT],bounds=list(map(rounded,bounds.bounds)),roads=roads,terrain=terrain,water=triangles(water),riverwalk=triangles(riverwalk),parks=[tri for p in parks for tri in triangles(p.intersection(exposed_ground))],shorelines=rings(water),bridgeDeck=triangles(bridge),bridgeEdges=rings(bridge),bridgeAbutments=rings(abutments),bridgeRails=[[[float(x),float(z)] for x,z in line.coords] for line in rail_lines if line.geom_type=='LineString' and line.length>1])
-    output=dict(world=world,environment=env,report=dict(buildings=len(objects),roads=len(roads),families=dict(families),heights=dict(heights),bounds=BBOX,origin=[LON,LAT],licence='ODbL-1.0',attribution='© OpenStreetMap contributors',waterArea=rounded(water.area)))
+    output=dict(world=world,environment=env,report=dict(buildings=len(objects),protectedBuildings=protected_ids,fittedBuildings=fitted_count,omittedBuildings=skipped_count,roads=len(roads),families=dict(families),heights=dict(heights),bounds=BBOX,origin=[LON,LAT],licence='ODbL-1.0',attribution='© OpenStreetMap contributors',waterArea=rounded(water.area)))
     assert len({o['id'] for o in objects})==len(objects), 'Duplicate OSM building IDs'
     (ROOT/'src/generated').mkdir(exist_ok=True)
     (ROOT/'src/generated/chicago.json').write_text(json.dumps(output,separators=(',',':'))+'\n')

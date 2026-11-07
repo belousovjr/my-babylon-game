@@ -72,8 +72,10 @@ check IDs, dimensions, heights, triangle orientation, spawn support and LOD redu
 - Elevated L uses above-ground CTA `railway=subway` ways; mainline rail, yards and tunnels are excluded.
   Shared nodes and short fragments are merged before clipping. Adjacent tracks share a continuous
   closed deck with a top at 6 m and underside at 5.65 m; rails and supports are generated offline.
-  Building rectangles are fitted outside the track corridor on the editor grid; rectangles with
-  less than 25% usable area are omitted. Detailed station buildings/platforms are not modeled.
+  Building rectangles are fitted to supported land outside street paving and the track corridor,
+  on the editor grid. A bounded search shrinks dimensions in 5% steps and may recenter inside
+  the original footprint. Width/depth stay at least 5 m and area at least 25% of the original;
+  otherwise the object is omitted. The full 1.03× trim envelope must fit. Detailed station buildings/platforms are not modeled.
 - Trees and lamps are procedurally spaced along eligible streets. They are not individually surveyed
   positions; lamps are geometry, without hundreds of real light sources. No trains, traffic or interiors.
 
@@ -96,3 +98,13 @@ Generation checks complete map coverage; geometry tests also verify that every p
 
 Architectural trim uses a shared material with `zOffset = zOffsetUnits = -1` to win depth ties
 against the body. Each LOD keeps at most two material submeshes; geometry and colliders are unchanged.
+
+Generation asserts support for every building; tests independently check serialized terrain coverage,
+street/sidewalk exclusion and a grounded base. Fit/omission counts are recorded in `report.json`.
+
+Landmark references, distinctive Art Deco profiles and buildings at least 150 m tall are placed first and may not be omitted.
+They retain height, can move at most 32 m per axis, and shrink only by a common horizontal scale
+(no more than 50%). Failure stops generation instead of silently dropping the landmark.
+Repeated Marina profiles are an identical ensemble: equal square diameter, height and orientation,
+with one translation/scale preserving their relative positions. Ordinary buildings fit around
+reserved landmark footprints. `protectedBuildings` in the report lists all protected IDs.

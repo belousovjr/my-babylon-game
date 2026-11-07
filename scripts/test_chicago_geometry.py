@@ -152,10 +152,64 @@ class StreetGeometryTests(unittest.TestCase):
     def test_building_fit_preserves_grid_and_leaves_track_corridor_clear(self):
         corridor=box(4,-30,8,30)
         o=dict(position=[0,10,0],size=[20,20,20],yaw=0)
-        result=city.fit_rail_clearance(o,corridor)
+        result=city.fit_building(o,box(-30,-30,30,30).difference(corridor))
         self.assertIsNotNone(result)
         w,h,d=result['size'];x,y,z=result['position']
         self.assertLess(box(x-w/2,z-d/2,x+w/2,z+d/2).intersection(corridor).area,1e-6)
         self.assertEqual(y-h/2,0)
         self.assertEqual(x,round(x))
         self.assertEqual(w*4,round(w*4))
+
+    def test_every_generated_building_is_supported_and_clear_of_roads_and_sidewalks(self):
+        import json
+        data=json.loads((Path(__file__).resolve().parents[1]/'src/generated/chicago.json').read_text())
+        env=data['environment']
+        ground=unary_union([Polygon(t) for cell in env['terrain'] for t in cell['triangles']])
+        pavement=unary_union([Polygon(t) for key in ['roadSurface','sidewalks','curbs'] for t in env[key]])
+        for o in data['world']['objects']:
+            footprint=city.building_footprint(o)
+            self.assertLess(footprint.difference(ground).area,1e-6,o['id']+' lacks ground support')
+            self.assertLess(footprint.intersection(pavement).area,1e-6,o['id']+' overlaps street paving')
+            self.assertEqual(o['position'][1]-o['size'][1]/2,0)
+
+    def test_buildings_fit_shoreline_steps_without_overhanging(self):
+        land=box(-30,-30,4,30)
+        o=dict(position=[0,10,0],size=[20,20,20],yaw=0)
+        fitted=city.fit_building(o,land)
+        self.assertIsNotNone(fitted)
+        self.assertTrue(land.covers(city.building_footprint(fitted)))
+        self.assertLess(fitted['size'][0]*fitted['size'][2],400)
+        self.assertIsNone(city.fit_building(o,box(-1,-1,1,1)))
+
+    def test_landmark_ensemble_keeps_identical_size_and_relative_layout(self):
+        objects=[dict(id='a',position=[0,20,0],size=[20,40,20],yaw=.3),
+                 dict(id='b',position=[30,20,0],size=[20.25,40,19.75],yaw=1.2)]
+        land=box(-100,20,100,100)
+        fitted=city.fit_landmark_group(objects,land,identical=True)
+        self.assertEqual(fitted[0]['size'],fitted[1]['size'])
+        self.assertEqual(fitted[0]['yaw'],fitted[1]['yaw'])
+        self.assertEqual(fitted[1]['position'][0]-fitted[0]['position'][0],30)
+        self.assertEqual(fitted[1]['position'][2]-fitted[0]['position'][2],0)
+        for original,o in zip(objects,fitted):
+            self.assertTrue(land.covers(city.building_footprint(o)))
+            self.assertLessEqual(abs(original['position'][2]-o['position'][2]),32)
+        with self.assertRaises(RuntimeError):
+            city.fit_landmark_group(objects,box(-1,-1,1,1),identical=True)
+
+    def test_landmarks_survive_and_marina_pair_is_identical(self):
+        import json
+        data=json.loads((Path(__file__).resolve().parents[1]/'src/generated/chicago.json').read_text())
+        objects=data['world']['objects'];ids={o['id'] for o in objects}
+        self.assertTrue(set(data['report']['protectedBuildings'])<=ids)
+        self.assertEqual(data['report']['heights']['landmark-reference'],7)
+        twins=[o for o in objects if o['templateId']=='marina']
+        self.assertEqual(len(twins),2)
+        self.assertEqual(twins[0]['size'],twins[1]['size'])
+        self.assertEqual(twins[0]['yaw'],twins[1]['yaw'])
+        self.assertEqual(twins[0]['position'][1],twins[1]['position'][1])
+        for a in objects:
+            if a['id'] not in data['report']['protectedBuildings']:continue
+            footprint=city.building_footprint(a)
+            for b in objects:
+                if a['id']!=b['id']:
+                    self.assertLess(footprint.intersection(city.building_footprint(b)).area,1e-6,a['id']+' overlaps '+b['id'])
