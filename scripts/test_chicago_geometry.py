@@ -2,7 +2,7 @@
 import importlib.util
 import unittest
 from pathlib import Path
-from shapely.geometry import Polygon, LineString, box
+from shapely.geometry import Polygon, LineString, Point, box
 from shapely.ops import unary_union
 from shapely import set_precision
 
@@ -57,3 +57,13 @@ class StreetGeometryTests(unittest.TestCase):
         asphalt,sidewalk,_=city.street_surfaces(roads,box(-30,-30,30,30))
         self.assertTrue(asphalt.is_valid and sidewalk.is_valid)
         self.assertTrue(asphalt.covers(Polygon([(0,4),(10,4),(10,4.4)])))
+
+    def test_plaza_pools_do_not_generate_river_pits_or_terraces(self):
+        import json
+        data=json.loads((Path(__file__).resolve().parents[1]/'src/generated/chicago.json').read_text())['environment']
+        river=unary_union([Polygon(t) for key in ['water','riverwalk'] for t in data[key]])
+        ground=unary_union([Polygon(t) for cell in data['terrain'] for t in cell['triangles']])
+        for x,z in [(600.75,129.48),(632.49,129.78)]:
+            point=Point(x,z)
+            self.assertGreater(river.distance(point),20)
+            self.assertTrue(ground.covers(point),'small plaza pools must leave the ground intact')

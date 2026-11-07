@@ -60,19 +60,20 @@ def main():
         if len(c)<4 or c[0]!=c[-1]: return Polygon()
         return Polygon(c).buffer(0)
     bounds=box(*project(BBOX[0],BBOX[1]),*project(BBOX[2],BBOX[3]))
+    # Only rivers receive lowered terraces; small pools and fountains are omitted.
     water=[]; relation_buildings=[]; outer_buildings=set()
     for rid,(t,members) in relations.items():
-        if t.get('natural')=='water' or t.get('building'):
+        if (t.get('natural')=='water' and t.get('water')=='river') or t.get('building'):
             lines=[LineString(coords(ways[ref][1])) for ref,role in members if role!='inner' and ref in ways and len(coords(ways[ref][1]))>=2]
             polygons=list(polygonize(unary_union(lines))) if lines else []
             for p in polygons:
                 p=p.intersection(bounds)
                 if p.is_empty: continue
-                if t.get('natural')=='water': water.append(p)
+                if t.get('natural')=='water' and t.get('water')=='river': water.append(p)
                 elif t.get('building'):
                     relation_buildings.append((f'r{rid}',t,p));outer_buildings.update(ref for ref,_ in members)
     for wid,(t,refs) in ways.items():
-        if t.get('natural')=='water':
+        if t.get('natural')=='water' and t.get('water')=='river':
             p=polygon(refs).intersection(bounds)
             if not p.is_empty:water.append(p)
     water=unary_union(water).buffer(0)

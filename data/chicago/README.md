@@ -64,7 +64,8 @@ check IDs, dimensions, heights, triangle orientation, spawn support and LOD redu
   Buildings and road geometry can disagree where OSM is incomplete or the rectangle approximation expands a footprint.
 - The Loop street datum is flat at 0 m. Sidewalks +0.16 m, river water -5.5 m and Riverwalk -3.8 m
   are schematic local elevations, not DEM/LiDAR measurements. Quay walls and four ramps show
-  the level difference. Full Lower Wacker/tunnel interiors are excluded.
+  the level difference. Only OSM `water=river` receives this treatment; small pools and fountains are omitted.
+  Full Lower Wacker/tunnel interiors are excluded.
 - Street bridges share the street datum. Bridge mechanics, exact bridge slopes and handrails are omitted.
 - Elevated L alignment comes from OSM rail lines; deck clearance is an estimated 6 m.
 - Trees and lamps are procedurally spaced along eligible streets. They are not individually surveyed
