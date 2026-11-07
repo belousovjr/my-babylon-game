@@ -153,6 +153,7 @@ def railway_bridge_trusses(deck,pavement,water,banks):
 def railway_support_candidates(points,sidewalks,asphalt,lowered_banks,deck,ground):
     allowed=sidewalks.buffer(-.5).union(ground.buffer(-.5)).difference(lowered_banks.buffer(.5))
     if allowed.is_empty:return []
+    allowed=allowed.difference(deck.buffer(.55))
     edges=[LineString(ring) for ring in rings(deck)]
     for x,z in points:
         origin=Point(x,z)
@@ -168,11 +169,20 @@ def railway_support_candidates(points,sidewalks,asphalt,lowered_banks,deck,groun
             spans=[line for line in spans if line.geom_type=='LineString' and line.length>2]
             if not spans:continue
             span=min(spans,key=lambda line:line.distance(origin))
+            # Join nearby parallel tracks into one frame, without filling the deck gap.
+            for neighbour in sorted(spans,key=lambda line:line.distance(span)):
+                if neighbour==span or span.distance(neighbour)>4:continue
+                mid=neighbour.interpolate(.5,normalized=True)
+                if not all(deck.covers(Point(mid.x-nz*offset,mid.y+nx*offset)) for offset in [-6,6]):continue
+                endpoints=[Point(p) for line in [span,neighbour] for p in [line.coords[0],line.coords[-1]]]
+                endpoints.sort(key=lambda p:p.x*nx+p.y*nz)
+                joined=LineString([endpoints[0],endpoints[-1]])
+                if joined.length<=14:span=joined
             a,b=Point(span.coords[0]),Point(span.coords[-1])
             ux,uz=(b.x-a.x)/span.length,(b.y-a.y)/span.length
             pair=[]
             for point,sign in [(a,-1),(b,1)]:
-                candidates=allowed.intersection(LineString([(point.x-ux*1.5*sign,point.y-uz*1.5*sign),(point.x+ux*4*sign,point.y+uz*4*sign)]))
+                candidates=allowed.intersection(LineString([(point.x+ux*.55*sign,point.y+uz*.55*sign),(point.x+ux*4*sign,point.y+uz*4*sign)]))
                 if candidates.is_empty:break
                 foot=nearest_points(point,candidates)[1]
                 pair.append(dict(position=[foot.x,.16 if sidewalks.covers(foot) else 0,foot.y],top=6.05,attachment=[point.x,point.y],skew=angle))

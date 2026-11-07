@@ -288,6 +288,8 @@ class StreetGeometryTests(unittest.TestCase):
             foot=city.translate(city.rotate(box(-.325,-.325,.325,.325),angle,origin=(0,0),use_radians=True),x,z)
             self.assertTrue((sidewalk if base==.16 else ground).covers(foot))
             self.assertLess(foot.intersection(asphalt).area,1e-6)
+            column=city.translate(city.rotate(box(-.175,-.175,.175,.175),angle,origin=(0,0),use_radians=True),x,z)
+            self.assertGreaterEqual(column.distance(deck),.3-1e-6)
             self.assertIn(base,[0,.16])
             self.assertGreaterEqual(support['top'],6)
             self.assertLess(deck.distance(Point(support['attachment'])),1e-6)
@@ -391,3 +393,34 @@ class StreetGeometryTests(unittest.TestCase):
             for side in truss['sides']:
                 for endpoint in side:
                     self.assertFalse(lowered_banks.intersects(Point(endpoint).buffer(.25)))
+
+    def test_parallel_tracks_share_support_frames_outside_both_decks(self):
+        deck=box(-5,-50,-1,50).union(box(1,-50,5,50))
+        asphalt=box(-5.5,-50,5.5,50)
+        sidewalk=asphalt.buffer(3.2).difference(asphalt)
+        for origin in [[-5,0],[-1,0],[1,0],[5,0]]:
+            supports=city.place_railway_supports([origin],sidewalk,asphalt,Polygon(),deck,Polygon())
+            self.assertEqual(len(supports),2)
+            attachments=sorted(s['attachment'][0] for s in supports)
+            self.assertAlmostEqual(attachments[0],-5)
+            self.assertAlmostEqual(attachments[1],5)
+            for support in supports:
+                self.assertFalse(asphalt.intersects(Point(support['position'][0],support['position'][2]).buffer(.325)))
+
+    def test_distant_parallel_tracks_keep_separate_frames(self):
+        deck=box(-10,-50,-6,50).union(box(6,-50,10,50))
+        ground=box(-30,-60,30,60)
+        supports=city.place_railway_supports([[-10,0]],Polygon(),Polygon(),Polygon(),deck,ground)
+        self.assertEqual(len(supports),2)
+        self.assertLess(max(s['attachment'][0] for s in supports),0)
+
+    def test_support_columns_keep_clearance_on_both_sides_of_curved_deck(self):
+        centre=LineString([(0,-50),(0,0),(15,30),(50,40)])
+        deck=centre.buffer(2.1,cap_style=2,join_style=2)
+        points=[list(LineString(ring).interpolate(d).coords)[0] for ring in city.rings(deck) for d in range(4,int(LineString(ring).length),4)]
+        ground=box(-100,-100,100,100)
+        supports=city.place_railway_supports(points,Polygon(),Polygon(),Polygon(),deck,ground)
+        self.assertGreater(len(supports),4)
+        for support in supports:
+            x,_,z=support['position']
+            self.assertGreaterEqual(Point(x,z).distance(deck),.55-1e-6)
