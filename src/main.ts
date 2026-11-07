@@ -18,6 +18,7 @@ import '@babylonjs/loaders/glTF/2.0/glTFLoader.js';
 import { CELL_SIZE, cellAt, createWorld, parseWorld, WORLD_LIMIT } from './world';
 import type { Kind, Triple, WorldData, WorldObject } from './world';
 import { initialPlayerState, stepPlayer } from './player';
+import { FollowCamera, MIN_CAMERA_DISTANCE } from './followCamera';
 import './style.css';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
@@ -55,10 +56,10 @@ const light = new HemisphericLight('sky', new Vector3(0.4, 1, 0.3), scene);
 light.intensity = 1.05;
 light.groundColor = Color3.FromHexString('#56616b');
 const camera = new ArcRotateCamera('follow', -Math.PI / 2, 1.22, 9, new Vector3(32, 1, 22), scene);
-camera.lowerRadiusLimit = 2.5; camera.upperRadiusLimit = 16;
+camera.lowerRadiusLimit = MIN_CAMERA_DISTANCE; camera.upperRadiusLimit = 16;
 camera.lowerBetaLimit = 0.25; camera.upperBetaLimit = 1.48;
 camera.wheelPrecision = 35; camera.panningSensibility = 0;
-camera.checkCollisions = true; camera.collisionRadius.setAll(0.25);
+camera.checkCollisions = false;
 camera.minZ = 0.1; camera.maxZ = 240;
 camera.attachControl(canvas, true);
 camera.inputs.removeByType('ArcRotateCameraKeyboardMoveInput');
@@ -69,7 +70,10 @@ editorCamera.keysUp = [87]; editorCamera.keysDown = [83];
 editorCamera.keysLeft = [65]; editorCamera.keysRight = [68];
 editorCamera.keysUpward = [69]; editorCamera.keysDownward = [81];
 editorCamera.inputs.removeByType('FreeCameraTouchInput');
-scene.activeCamera = camera;
+const followCamera = new UniversalCamera('follow-view', camera.position.clone(), scene);
+followCamera.minZ = 0.05; followCamera.maxZ = camera.maxZ;
+const cameraBoom = new FollowCamera();
+scene.activeCamera = followCamera;
 
 const materials = new Map<string, StandardMaterial>();
 function material(hex: string) {
@@ -100,7 +104,7 @@ function addMesh(o: WorldObject) {
   const mesh = MeshBuilder.CreateBox(o.id, { size: 1 }, scene);
   mesh.position.copyFromFloats(...o.position); mesh.scaling.copyFromFloats(...o.size);
   mesh.rotation.y = o.yaw; mesh.material = material(o.color);
-  mesh.checkCollisions = true; mesh.metadata = { worldId: o.id };
+  mesh.checkCollisions = true; mesh.metadata = { worldId: o.id, kind: o.kind };
   updateCellCoverage(mesh);
   meshes.set(o.id, mesh); return mesh;
 }
@@ -204,6 +208,7 @@ function watchGizmos() {
   }
 }
 function respawn() {
+  cameraBoom.reset();
   player.position.copyFromFloats(...world.spawn); playerState = initialPlayerState(); jumpQueued = false;
   camera.target.copyFrom(player.position).addInPlaceFromFloats(0, 1.1, 0);
 }
@@ -212,6 +217,7 @@ function setMode() {
   $('editor').hidden = !editing; $('intro').hidden = editing;
   $('mode').innerHTML = editing ? 'Играть <kbd>Tab</kbd>' : 'Редактор <kbd>Tab</kbd>';
   if (editing) {
+    cameraBoom.reset();
     camera.detachControl();
     editorCamera.position.copyFrom(player.position).addInPlaceFromFloats(0, 18, -18);
     editorCamera.setTarget(player.position.add(new Vector3(0, 1, 0)));
@@ -223,7 +229,7 @@ function setMode() {
     for (const m of meshes.values()) m.setEnabled(true);
     notify('Редактор · изменения применяются сразу. Сохраните карту перед выходом.');
   } else {
-    editorCamera.detachControl(); scene.activeCamera = camera; camera.attachControl(canvas, true);
+    editorCamera.detachControl(); scene.activeCamera = followCamera; camera.attachControl(canvas, true);
     select(null); respawn(); notify('Режим игры · карта применена');
   }
   canvas.focus();
@@ -353,6 +359,13 @@ engine.runRenderLoop(() => {
       }
     }
   } else { accumulator = 0; }
+  if (!editing) {
+    // The orbit camera owns input/desired zoom; the render camera owns the collision-safe pose.
+    camera.update();
+    cameraBoom.update(camera.target, camera.position, meshes.values(), dt);
+    followCamera.position.copyFrom(cameraBoom.position);
+    followCamera.setTarget(camera.target);
+  }
   scene.render();
   statsTime += dt;
   if (statsTime >= 0.5) {
