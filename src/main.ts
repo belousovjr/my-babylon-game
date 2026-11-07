@@ -221,7 +221,8 @@ function rebuild() {
       if (!template) continue;
       const root = colliderSource.clone(`street-prop-${i}`, null, true)!;
       root.isVisible = false; root.isPickable = false; root.setEnabled(true);
-      root.position.copyFromFloats(...prop.position); root.scaling.copyFromFloats(...template.size); root.rotation.y = prop.yaw;
+      root.position.copyFromFloats(...prop.position); root.position.y += template.size[1] / 2;
+      root.scaling.copyFromFloats(...template.size); root.rotation.y = prop.yaw;
       root.metadata = { templateId: template.id, kind: 'obstacle' };
       attachModel(root, template, template.color, false); furnitureRoots.push(root);
     }

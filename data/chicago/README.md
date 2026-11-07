@@ -108,3 +108,8 @@ They retain height, can move at most 32 m per axis, and shrink only by a common 
 Repeated Marina profiles are an identical ensemble: equal square diameter, height and orientation,
 with one translation/scale preserving their relative positions. Ordinary buildings fit around
 reserved landmark footprints. `protectedBuildings` in the report lists all protected IDs.
+
+Architectural primitive contacts are checked at every LOD using convex-solid SAT, including
+containment and tangent contact. Each part must connect through other parts to the base;
+intersecting bounding boxes alone do not establish support. Street furniture uses ray-tested
+ground anchors and its current template half-height rather than a fixed sidewalk elevation.

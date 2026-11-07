@@ -95,3 +95,17 @@ test('bridges have a collision underside visible from below', () => {
   assert.ok(meshes.some(m=>m.checkCollisions&&Math.abs((ray.intersectsMesh(m).pickedPoint?.y??99)+0.85)<0.001));
   scene.dispose();engine.dispose();
 });
+
+test('all generated trees and lamps stand on a collision surface', () => {
+  const engine=new NullEngine(),scene=new Scene(engine),mat=new StandardMaterial('surface',scene);
+  const {meshes,props}=drawChicagoStreets(scene,()=>mat);
+  const failures=[];
+  for(const prop of props) {
+    const [x,base,z]=prop.position;
+    const ray=new Ray(new Vector3(x,base+.5,z),Vector3.Down(),1);
+    const hits=meshes.filter(m=>m.checkCollisions).map(m=>ray.intersectsMesh(m)).filter(h=>h.hit);
+    if(!hits.some(h=>Math.abs(h.pickedPoint!.y-base)<1e-5)) failures.push({type:prop.templateId,x,z,base,floor:hits.map(h=>h.pickedPoint!.y)});
+  }
+  scene.dispose();engine.dispose();
+  assert.deepEqual(failures,[]);
+});

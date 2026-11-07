@@ -1,9 +1,12 @@
+import { Ray } from '@babylonjs/core/Culling/ray.js';
+import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
 import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData.js';
 import type { Scene } from '@babylonjs/core/scene.js';
 import type { Material } from '@babylonjs/core/Materials/material.js';
 import chicago from './generated/chicago.json' with { type: 'json' };
 
+// Furniture positions are ground anchors; their template height is applied by the scene.
 export type StreetFurniture = { templateId: 'tree' | 'lamp'; position: [number, number, number]; yaw: number };
 export function elevationAt(_x: number, _z: number, surface: 'street' | 'sidewalk' | 'water' | 'riverwalk' = 'street') {
   // shortcut: flat Loop datum plus stylized river terraces; replace with surveyed terrain when available.
@@ -78,8 +81,8 @@ export function drawChicagoStreets(scene: Scene, material: (color: string) => Ma
       }
       if (!road.bridge && length > 45) for (let distance = 25; distance < length - 20; distance += 85) {
         const side = road.width / 2 + 2.2, t = distance / length;
-        props.push({ templateId: 'lamp', position: [a[0]! + dx * t + nx * side, 4.16, a[1]! + dz * t + nz * side], yaw });
-        props.push({ templateId: 'tree', position: [a[0]! + dx * t - nx * side, 4.16, a[1]! + dz * t - nz * side], yaw: 0 });
+        props.push({ templateId: 'lamp', position: [a[0]! + dx * t + nx * side, 0, a[1]! + dz * t + nz * side], yaw });
+        props.push({ templateId: 'tree', position: [a[0]! + dx * t - nx * side, 0, a[1]! + dz * t - nz * side], yaw: 0 });
       }
     }
   }
@@ -117,6 +120,19 @@ export function drawChicagoStreets(scene: Scene, material: (color: string) => Ma
     vertexData.applyToMesh(mesh); mesh.material = material(b.color); mesh.checkCollisions = b.collision;
     mesh.isPickable = b.collision; mesh.metadata = { worldId: mesh.name, kind: 'ground', procedural: true };
     mesh.freezeWorldMatrix(); meshes.push(mesh);
+  }
+  const groundRay = new Ray(Vector3.Zero(), Vector3.Down(), 7);
+  for (const prop of props) {
+    prop.position[0] = Math.max(data.bounds[0]! + 0.25, Math.min(data.bounds[2]! - 0.25, prop.position[0]));
+    prop.position[2] = Math.max(data.bounds[1]! + 0.25, Math.min(data.bounds[3]! - 0.25, prop.position[2]));
+    groundRay.origin.set(prop.position[0], 0.5, prop.position[2]);
+    let floor = -Infinity;
+    for (const mesh of meshes) if (mesh.checkCollisions) {
+      const hit = groundRay.intersectsMesh(mesh);
+      if (hit.hit) floor = Math.max(floor, hit.pickedPoint!.y);
+    }
+    if (!Number.isFinite(floor)) throw new Error(`No ground beneath ${prop.templateId} at ${prop.position[0]}, ${prop.position[2]}`);
+    prop.position[1] = floor;
   }
   return { meshes, props };
 }

@@ -29,7 +29,10 @@ export function buildArchitecture(template: ObjectTemplate, scene: Scene, materi
         const z = detail === 2 ? 0 : (Math.floor(i / 3) - 1) * 0.22;
         part(x, -0.5 + h * 0.47, z, 0.2, h * 0.94, detail === 2 ? 0.65 : 0.22);
       });
-      if (detail === 0) for (const x of [-0.15, 0.15]) part(x, 0.45, 0, 0.012, 0.1, 0.012, 1.4);
+      if (detail === 0) for (const i of [4, 5]) {
+        const roof = -0.5 + heights[i]! * 0.94;
+        part((i % 3 - 1) * 0.2, (roof + 0.5) / 2, 0, 0.012, 0.5 - roof, 0.012, 1.4);
+      }
     } else if (profile === 'rounded' || profile === 'deco') {
       for (let i = 0; i < 3; i++) {
         const width = 1 - i * 0.23;
