@@ -16,7 +16,7 @@ class StreetGeometryTests(unittest.TestCase):
                 Polygon([(0,0),(20,0),(20,20),(0,20)],holes=[[(2,3),(16,4),(12,17),(4,12)]])]
         for shape in shapes:
             result=unary_union([Polygon(t) for t in city.triangles(shape)])
-            self.assertLess(set_precision(shape,0.01).symmetric_difference(result).area,1e-6)
+            self.assertLess(shape.symmetric_difference(result).area,1e-6)
 
     def test_curb_follows_both_sides_of_closed_block_without_gaps(self):
         road=LineString([(0,0),(30,0),(30,30),(0,30),(0,0)]).buffer(3,join_style=2)
@@ -24,15 +24,14 @@ class StreetGeometryTests(unittest.TestCase):
         self.assertEqual(len(city.rings(road)),2)
         self.assertEqual(len(city.rings(curb)),4)
         result=unary_union([Polygon(t) for t in city.triangles(curb)])
-        self.assertLess(set_precision(curb,0.01).symmetric_difference(result).area,1e-6)
+        self.assertLess(curb.symmetric_difference(result).area,1e-6)
         self.assertLess(result.intersection(road).area,1e-6)
         self.assertTrue(all(r[0]==r[-1] for r in city.rings(curb)))
 
-    def test_near_duplicate_boundary_vertices_are_snapped_before_triangulation(self):
+    def test_triangulation_preserves_shared_boundary_vertices(self):
         shape=Polygon([(0,0),(100,0),(100,20),(0.00001,20),(0,19.99999)])
-        faces=city.triangles(shape)
-        self.assertEqual(len(faces),2)
-        self.assertEqual(sum(Polygon(t).area for t in faces),2000)
+        result=unary_union([Polygon(t) for t in city.triangles(shape)])
+        self.assertLess(shape.symmetric_difference(result).area,1e-9)
 
     def test_generated_ground_does_not_overlap_paving(self):
         import json
@@ -78,3 +77,45 @@ class StreetGeometryTests(unittest.TestCase):
         import json
         objects=json.loads((Path(__file__).resolve().parents[1]/'src/generated/chicago.json').read_text())['world']['objects']
         self.assertFalse({'osm-w1175853280','osm-w1175853281'} & {o['id'] for o in objects})
+
+    def test_quay_walls_share_terrace_edges_and_bridges_stay_over_water(self):
+        import json
+        data=json.loads((Path(__file__).resolve().parents[1]/'src/generated/chicago.json').read_text())['environment']
+        water=unary_union([Polygon(t) for t in data['water']])
+        terrace=unary_union([Polygon(t) for t in data['riverwalk']])
+        walls=unary_union([LineString(r) for key in ['shorelines','terraceWalls'] for r in data[key]])
+        self.assertLess(terrace.boundary.difference(walls.buffer(0.02)).length,0.01)
+        bridge=unary_union([Polygon(t) for t in data['bridgeDeck']])
+        self.assertGreater(bridge.area,100)
+        self.assertLess(bridge.difference(water.buffer(9.1)).area,0.01)
+        self.assertGreater(len(data['bridgeRails']),0)
+        for line in data['bridgeRails']:
+            rail=LineString(line)
+            self.assertLess(rail.difference(bridge.boundary.buffer(0.02)).length,0.01)
+            self.assertGreater(rail.distance(water.buffer(7,join_style=3).boundary),0.4)
+
+    def test_bridge_structure_covers_approaches_and_has_bank_abutments(self):
+        import json
+        data=json.loads((Path(__file__).resolve().parents[1]/'src/generated/chicago.json').read_text())['environment']
+        water=unary_union([Polygon(t) for t in data['water']])
+        paving=unary_union([Polygon(t) for k in ['roadSurface','sidewalks','curbs'] for t in data[k]])
+        bridge=unary_union([Polygon(t) for t in data['bridgeDeck']])
+        approaches=paving.intersection(water.buffer(6.9,join_style=3))
+        self.assertLess(approaches.difference(bridge.buffer(0.02)).area,0.01)
+        supports=unary_union([Polygon(r) for r in data['bridgeAbutments']])
+        self.assertGreater(supports.area,100)
+        self.assertLess(supports.difference(bridge.buffer(0.02)).area,0.01)
+        self.assertLess(supports.intersection(water.buffer(-0.02)).area,0.01)
+
+    def test_generated_surfaces_cover_map_and_all_paving_edges_have_sides(self):
+        import json
+        data=json.loads((Path(__file__).resolve().parents[1]/'src/generated/chicago.json').read_text())['environment']
+        terrain=unary_union([Polygon(t) for cell in data['terrain'] for t in cell['triangles']])
+        regions=[terrain]+[unary_union([Polygon(t) for t in data[key]]) for key in ['roadSurface','sidewalks','curbs','water','riverwalk']]
+        missing=box(*data['bounds']).difference(unary_union(regions))
+        self.assertLess(missing.area,1e-5,'no horizontal gaps anywhere in the generated map')
+        for key,edge,height in zip(['roadSurface','sidewalks','curbs'],data['pavingEdges'],[.03,.16,.18]):
+            surface=unary_union([Polygon(t) for t in data[key]])
+            sides=unary_union([LineString(line) for line in edge['lines']])
+            self.assertEqual(edge['top'],height)
+            self.assertLess(surface.boundary.difference(sides.buffer(1e-6)).length,1e-5,'no exposed vertical edge')

@@ -66,3 +66,13 @@ test('generated buildings follow editor grid and remain grounded', () => {
     assert.equal(o.position[1]-o.size![1]/2,0,`${o.id}: base stays on ground`);
   }
 });
+
+test('bridges have a collision underside visible from below', () => {
+  const engine=new NullEngine(),scene=new Scene(engine),mat=new StandardMaterial('surface',scene);
+  const {meshes}=drawChicagoStreets(scene,()=>mat);
+  const triangle=data.environment.bridgeDeck.find(t=>Math.abs((t[1][0]-t[0][0])*(t[2][1]-t[0][1])-(t[1][1]-t[0][1])*(t[2][0]-t[0][0]))>1)!;
+  const x=triangle.reduce((sum,p)=>sum+p[0],0)/3,z=triangle.reduce((sum,p)=>sum+p[1],0)/3;
+  const ray=new Ray(new Vector3(x,-2,z),Vector3.Up(),2);
+  assert.ok(meshes.some(m=>m.checkCollisions&&Math.abs((ray.intersectsMesh(m).pickedPoint?.y??99)+0.85)<0.001));
+  scene.dispose();engine.dispose();
+});

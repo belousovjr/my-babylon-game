@@ -29,15 +29,28 @@ export function drawChicagoStreets(scene: Scene, material: (color: string) => Ma
     }
     for (const i of cube.indices!) b.indices.push(offset + i);
   }
-  function surface(triangles: number[][][], y: number, color: string, collision: boolean) {
+  function surface(triangles: number[][][], y: number, color: string, collision: boolean, downward = false) {
     for (const tri of triangles) {
       const x = tri.reduce((s, p) => s + p[0]!, 0) / 3, z = tri.reduce((s, p) => s + p[1]!, 0) / 3;
       const b = batch(x, z, color, collision), offset = b.positions.length / 3;
       // Upward faces, regardless of GIS polygon winding.
       const [a, c, d] = tri;
       const points = (c![0]! - a![0]!) * (d![1]! - a![1]!) - (c![1]! - a![1]!) * (d![0]! - a![0]!) < 0 ? [a!, d!, c!] : [a!, c!, d!];
+      if (downward) points.reverse();
       for (const p of points) b.positions.push(p[0]!, y, p[1]!);
       b.indices.push(offset, offset + 1, offset + 2);
+    }
+  }
+  function walls(lines: number[][][], bottom: number, top: number, color: string) {
+    for (const line of lines) for (let i = 1; i < line.length; i++) {
+      const a = line[i - 1]!, c = line[i]!;
+      const b = batch((a[0]! + c[0]!) / 2, (a[1]! + c[1]!) / 2, color, true);
+      // Independent vertices keep normals valid on both sides of the continuous wall.
+      for (const reverse of [false, true]) {
+        const offset = b.positions.length / 3;
+        b.positions.push(a[0]!, bottom, a[1]!, c[0]!, bottom, c[1]!, a[0]!, top, a[1]!, c[0]!, top, c[1]!);
+        b.indices.push(...(reverse ? [0, 2, 1, 1, 2, 3] : [0, 1, 2, 1, 3, 2]).map(n => n + offset));
+      }
     }
   }
   const data = chicago.environment;
@@ -51,13 +64,7 @@ export function drawChicagoStreets(scene: Scene, material: (color: string) => Ma
   surface(data.roadSurface, 0.03, '#454e50', true);
   surface(data.sidewalks, elevationAt(0, 0, 'sidewalk'), '#b6b2a4', true);
   surface(data.curbs, 0.18, '#c0bba9', true);
-  // Continuous top and side faces share the exact GIS contour, including block interiors.
-  for (const line of data.curbEdges) for (let i = 1; i < line.length; i++) {
-    const a = line[i - 1]!, c = line[i]!;
-    const b = batch((a[0]! + c[0]!) / 2, (a[1]! + c[1]!) / 2, '#c0bba9', true), offset = b.positions.length / 3;
-    b.positions.push(a[0]!, 0.03, a[1]!, c[0]!, 0.03, c[1]!, a[0]!, 0.18, a[1]!, c[0]!, 0.18, c[1]!);
-    b.indices.push(offset, offset + 1, offset + 2, offset + 1, offset + 3, offset + 2);
-  }
+  for (const edge of data.pavingEdges) walls(edge.lines, 0, edge.top, edge.color);
   for (const road of data.roads) {
     for (let i = 1; i < road.points.length; i++) {
       const a = road.points[i - 1]!, b = road.points[i]!;
@@ -84,14 +91,14 @@ export function drawChicagoStreets(scene: Scene, material: (color: string) => Ma
     for (const side of [-0.7, 0.7]) box(x - dz / length * side, 6.25, z + dx / length * side, length, 0.12, 0.09, yaw, '#959b92');
     for (let d = 15; d < length; d += 32) for (const side of [-1.3, 1.3]) box(a[0]! + dx * d / length - dz / length * side, 3, a[1]! + dz * d / length + dx / length * side, 0.35, 6, 0.35, 0, '#505b55');
   }
-  // Quay walls make the river's level difference visible; street bridges remain at the street datum.
-  for (const line of data.shorelines) for (let i = 1; i < line.length; i++) {
+  walls(data.shorelines, -5.5, -3.8, '#868b83');
+  walls(data.terraceWalls, -3.8, 0, '#868b83');
+  surface(data.bridgeDeck, -0.85, '#505b55', true, true);
+  walls(data.bridgeEdges, -0.85, 0.16, '#505b55');
+  walls(data.bridgeAbutments, -5.8, -0.85, '#868b83');
+  for (const line of data.bridgeRails) for (let i = 1; i < line.length; i++) {
     const a = line[i - 1]!, b = line[i]!, dx = b[0]! - a[0]!, dz = b[1]! - a[1]!;
-    box((a[0]! + b[0]!) / 2, -4.65, (a[1]! + b[1]!) / 2, Math.hypot(dx, dz), 1.7, 0.3, -Math.atan2(dz, dx), '#868b83');
-  }
-  for (const line of data.terraceWalls) for (let i = 1; i < line.length; i++) {
-    const a = line[i - 1]!, b = line[i]!, dx = b[0]! - a[0]!, dz = b[1]! - a[1]!;
-    box((a[0]! + b[0]!) / 2, -1.95, (a[1]! + b[1]!) / 2, Math.hypot(dx, dz), 3.9, 0.25, -Math.atan2(dz, dx), '#868b83');
+    box((a[0]! + b[0]!) / 2, 0.66, (a[1]! + b[1]!) / 2, Math.hypot(dx, dz), 1, 0.18, -Math.atan2(dz, dx), '#868b83');
   }
   for (const ramp of data.ramps) {
     const a = ramp.top, c = ramp.bottom, dx = c[0]! - a[0]!, dz = c[2]! - a[2]!, length = Math.hypot(dx, dz);

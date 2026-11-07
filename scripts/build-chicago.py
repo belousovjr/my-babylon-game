@@ -4,7 +4,7 @@ Requires Shapely >=2.1. Coordinates: east +X, north +Z, one unit = one metre.
 import gzip
 import json, math, re, glob, xml.etree.ElementTree as ET
 from pathlib import Path
-from collections import Counter
+from collections import Counter, defaultdict
 from shapely.geometry import Polygon, LineString, Point, box, MultiPolygon
 from shapely.ops import unary_union, polygonize
 from shapely import constrained_delaunay_triangles, set_precision
@@ -20,25 +20,27 @@ def number(s):
     m=re.search(r'[-+]?\d+(?:\.\d+)?',str(s or ''))
     return float(m.group()) if m else 0
 
+def snap_outline(poly):
+    # Snap source outlines once; keep intersections exact so neighbouring surfaces share vertices.
+    return set_precision(set_precision(poly,0.01),0)
+
 def triangles(poly):
     # Constrained triangulation preserves concave boundaries and holes without dropping faces.
-    poly=set_precision(poly,0.01)
     faces=constrained_delaunay_triangles(poly)
     assert abs(sum(t.area for t in faces.geoms)-poly.area)<max(1e-6,poly.area*1e-9), 'Incomplete surface triangulation'
-    return [[[round(float(x),5),round(float(z),5)] for x,z in list(t.exterior.coords)[:3]] for t in faces.geoms]
+    return [[[float(x),float(z)] for x,z in list(t.exterior.coords)[:3]] for t in faces.geoms]
 
 def rings(poly):
-    poly=set_precision(poly,0.01)
     polygons=list(poly.geoms) if hasattr(poly,'geoms') else [poly]
-    return [[[round(float(x),5),round(float(z),5)] for x,z in ring.coords]
+    return [[[float(x),float(z)] for x,z in ring.coords]
             for p in polygons if p.geom_type=='Polygon' for q in [orient(p,sign=1)] for ring in [q.exterior,*q.interiors]]
 
 def street_surfaces(roads,bounds):
     asphalt=unary_union([LineString(r['points']).simplify(0.3).buffer(r['width']/2,cap_style=2,join_style=3) for r in roads])
     # Close narrow notches with bevels instead of preserving pointed OSM leftovers.
     asphalt=asphalt.buffer(1.2,quad_segs=1,join_style=3).buffer(-1.2,quad_segs=1,join_style=3)
-    asphalt=set_precision(asphalt.simplify(0.6).intersection(bounds),0.01)
-    pavement=set_precision(asphalt.buffer(3.2,join_style=3).intersection(bounds),0.01)
+    asphalt=snap_outline(asphalt.simplify(0.6).intersection(bounds))
+    pavement=snap_outline(asphalt.buffer(3.2,join_style=3).intersection(bounds))
     return asphalt,pavement.difference(asphalt),pavement
 
 def unsupported_elevated_building(t):
@@ -64,7 +66,7 @@ def main():
         c=coords(refs)
         if len(c)<4 or c[0]!=c[-1]: return Polygon()
         return Polygon(c).buffer(0)
-    bounds=box(*project(BBOX[0],BBOX[1]),*project(BBOX[2],BBOX[3]))
+    bounds=snap_outline(box(*project(BBOX[0],BBOX[1]),*project(BBOX[2],BBOX[3])))
     # Only rivers receive lowered terraces; small pools and fountains are omitted.
     water=[]; relation_buildings=[]; outer_buildings=set()
     for rid,(t,members) in relations.items():
@@ -154,23 +156,35 @@ def main():
         objects.append(o)
         source.append(dict(id=wid,name=name,height=rounded(h),heightSource=method,profile=profile,footprint=[[rounded(x),rounded(z)] for x,z in p.exterior.coords]))
     road_union,sidewalks,pavement=street_surfaces(roads,bounds)
-    river_buffer=water.buffer(7)
+    pavement=pavement.union(road_union)
+    sidewalks=pavement.difference(road_union)
+    water=snap_outline(water.simplify(0.5,preserve_topology=True))
+    river_buffer=snap_outline(water.buffer(7,join_style=3))
+    # Carry the structural slab across the lowered bank terrace and into solid ground.
+    bridge=pavement.intersection(river_buffer.buffer(2,join_style=3))
+    abutments=pavement.intersection(water.buffer(2,join_style=3).difference(water))
+    bridge_rails=bridge.boundary.intersection(river_buffer.buffer(-0.5))
+    rail_lines=list(bridge_rails.geoms) if hasattr(bridge_rails,'geoms') else [bridge_rails]
+
     # No almost-coplanar ground beneath paving: it flickers through at overview distances.
-    exposed_ground=bounds.difference(river_buffer).difference(pavement.union(road_union).buffer(0.02))
-    assert exposed_ground.intersection(pavement.union(road_union)).area<1e-6
-    terrain=[]
-    for x in range(math.floor(bounds.bounds[0]/256)*256,math.ceil(bounds.bounds[2]/256)*256,256):
-      for z in range(math.floor(bounds.bounds[1]/256)*256,math.ceil(bounds.bounds[3]/256)*256,256):
-        p=box(x,z,x+256,z+256).intersection(exposed_ground)
-        tris=triangles(p)
-        if tris:terrain.append(dict(cell=[x,z],triangles=tris))
+    exposed_ground=bounds.difference(river_buffer).difference(pavement)
+    assert exposed_ground.intersection(pavement).area<1e-6
+    # Triangulate first, then batch: cutting polygons at cell borders introduces extra seam vertices.
+    terrain_cells=defaultdict(list)
+    for tri in triangles(exposed_ground):
+        cell=tuple(math.floor(sum(p[i] for p in tri)/3/256)*256 for i in [0,1])
+        terrain_cells[cell].append(tri)
+    terrain=[dict(cell=list(cell),triangles=tris) for cell,tris in sorted(terrain_cells.items())]
     # Riverwalk is an explicitly stylized lower terrace, not a surveyed elevation model.
-    riverwalk=water.buffer(7).difference(water).intersection(bounds)
+    riverwalk=river_buffer.difference(water).intersection(bounds)
     # A usable spawn on State Street, south of the river, outside building bounds.
     spawn=project(-87.6278,41.8865)
     world=dict(version=3,environment='chicago-loop',spawn=[round(spawn[0]),1,round(spawn[1])],templates=templates,objects=objects)
-    curbs=road_union.buffer(0.22,join_style=3).difference(road_union).intersection(sidewalks)
-    terrace_lines=[[[rounded(x),rounded(z)] for x,z in p.exterior.simplify(2).coords] for p in (list(river_buffer.geoms) if hasattr(river_buffer,'geoms') else [river_buffer]) if p.geom_type=='Polygon']
+    curbs=snap_outline(road_union.buffer(0.22,join_style=3)).difference(road_union).intersection(sidewalks)
+    sidewalks=sidewalks.difference(curbs)
+    paving_edges=[dict(top=height,color=color,lines=rings(poly)) for poly,height,color in [(road_union,0.03,'#454e50'),(sidewalks,0.16,'#b6b2a4'),(curbs,0.18,'#c0bba9')]]
+    assert bounds.difference(unary_union([exposed_ground,road_union,sidewalks,curbs,water,riverwalk])).area<1e-6, 'Uncovered terrain seam'
+    terrace_lines=rings(river_buffer.intersection(bounds))
     ramps=[]
     for p in (list(water.geoms) if hasattr(water,'geoms') else [water]):
       if p.geom_type!='Polygon':continue
@@ -183,7 +197,7 @@ def main():
         nx,nz=-dz/length,dx/length
         if water.contains(Point(mx+nx*2,mz+nz*2)):nx,nz=-nx,-nz
         ramps.append({'top':[rounded(mx+nx*8),0.17,rounded(mz+nz*8)],'bottom':[rounded(mx+dx/length*32+nx*3),-3.78,rounded(mz+dz/length*32+nz*3)]})
-    env=dict(rails=rails,roadSurface=triangles(road_union),sidewalks=triangles(sidewalks.difference(curbs)),curbs=triangles(curbs),curbEdges=rings(curbs),terraceWalls=terrace_lines,ramps=ramps,origin=[LON,LAT],bounds=list(map(rounded,bounds.bounds)),roads=roads,terrain=terrain,water=triangles(water),riverwalk=triangles(riverwalk),parks=[tri for p in parks for tri in triangles(p)],shorelines=[[[rounded(x),rounded(z)] for x,z in p.exterior.simplify(2).coords] for p in (list(water.geoms) if hasattr(water,'geoms') else [water]) if p.geom_type=='Polygon'])
+    env=dict(rails=rails,roadSurface=triangles(road_union),sidewalks=triangles(sidewalks),curbs=triangles(curbs),pavingEdges=paving_edges,terraceWalls=terrace_lines,ramps=ramps,origin=[LON,LAT],bounds=list(map(rounded,bounds.bounds)),roads=roads,terrain=terrain,water=triangles(water),riverwalk=triangles(riverwalk),parks=[tri for p in parks for tri in triangles(p.intersection(exposed_ground))],shorelines=rings(water),bridgeDeck=triangles(bridge),bridgeEdges=rings(bridge),bridgeAbutments=rings(abutments),bridgeRails=[[[float(x),float(z)] for x,z in line.coords] for line in rail_lines if line.geom_type=='LineString' and line.length>1])
     output=dict(world=world,environment=env,report=dict(buildings=len(objects),roads=len(roads),families=dict(families),heights=dict(heights),bounds=BBOX,origin=[LON,LAT],licence='ODbL-1.0',attribution='© OpenStreetMap contributors',waterArea=rounded(water.area)))
     assert len({o['id'] for o in objects})==len(objects), 'Duplicate OSM building IDs'
     (ROOT/'src/generated').mkdir(exist_ok=True)

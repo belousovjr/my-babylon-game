@@ -66,7 +66,9 @@ check IDs, dimensions, heights, triangle orientation, spawn support and LOD redu
   are schematic local elevations, not DEM/LiDAR measurements. Quay walls and four ramps show
   the level difference. Only OSM `water=river` receives this treatment; small pools and fountains are omitted.
   Full Lower Wacker/tunnel interiors are excluded.
-- Street bridges share the street datum. Bridge mechanics, exact bridge slopes and handrails are omitted.
+- Street bridges share the street datum, with a 0.85 m structural underside and simple solid parapets.
+  Structural decks extend across the lowered terraces and 2 m into land; simple bank abutments
+  support the spans. Parapets continue across the terraces and stop before the land junctions. Bridge mechanics and exact slopes are omitted.
 - Elevated L alignment comes from OSM rail lines; deck clearance is an estimated 6 m.
 - Trees and lamps are procedurally spaced along eligible streets. They are not individually surveyed
   positions; lamps are geometry, without hundreds of real light sources. No trains, traffic or interiors.
@@ -83,3 +85,7 @@ Generated building anchors snap to 1 m in X/Z, dimensions to 0.25 m and yaw to 1
 The Y centre is half the snapped height, keeping the base at street level. Procedural street contours retain their own geometric precision.
 
 Untyped, unnamed elevated `building=yes` structures without height or levels are omitted rather than turned into estimated ground-level towers. OSM `layer` is not a metric elevation.
+
+Surface boundaries are snapped only before polygon operations; intersections retain shared coordinates.
+Ground is triangulated before cell batching, and raised paving gets closed side faces down to ground level.
+Generation checks complete map coverage; geometry tests also verify that every paving boundary has a side face.
