@@ -70,6 +70,15 @@ test('generated buildings follow editor grid and remain grounded', () => {
 test('bridges have a collision underside visible from below', () => {
   const engine=new NullEngine(),scene=new Scene(engine),mat=new StandardMaterial('surface',scene);
   const {meshes}=drawChicagoStreets(scene,()=>mat);
+  for(const mesh of meshes.filter(m=>m.name.includes('#505b55'))) {
+    const positions=mesh.getVerticesData('position')!,indices=mesh.getIndices()!;
+    for(let i=0;i<indices.length;i+=3) {
+      const heights=[0,1,2].map(k=>positions[indices[i+k]*3+1]);
+      if(heights.some(y=>Math.abs(y+0.85)<1e-6)) {
+        assert.ok(heights.every(y=>y<=1e-6),'structural deck edges must not protrude through road or ground');
+      }
+    }
+  }
   const triangle=data.environment.bridgeDeck.find(t=>Math.abs((t[1][0]-t[0][0])*(t[2][1]-t[0][1])-(t[1][1]-t[0][1])*(t[2][0]-t[0][0]))>1)!;
   const x=triangle.reduce((sum,p)=>sum+p[0],0)/3,z=triangle.reduce((sum,p)=>sum+p[1],0)/3;
   const ray=new Ray(new Vector3(x,-2,z),Vector3.Up(),2);

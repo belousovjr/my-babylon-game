@@ -94,7 +94,7 @@ export function drawChicagoStreets(scene: Scene, material: (color: string) => Ma
   walls(data.shorelines, -5.5, -3.8, '#868b83');
   walls(data.terraceWalls, -3.8, 0, '#868b83');
   surface(data.bridgeDeck, -0.85, '#505b55', true, true);
-  walls(data.bridgeEdges, -0.85, 0.16, '#505b55');
+  walls(data.bridgeEdges, -0.85, 0, '#505b55');
   walls(data.bridgeAbutments, -5.8, -0.85, '#868b83');
   for (const line of data.bridgeRails) for (let i = 1; i < line.length; i++) {
     const a = line[i - 1]!, b = line[i]!, dx = b[0]! - a[0]!, dz = b[1]! - a[1]!;
