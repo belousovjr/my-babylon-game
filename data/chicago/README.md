@@ -120,3 +120,24 @@ than 60 m with an internal dead end or a redundant return loop are pruned (map-e
 connected asphalt component is kept, holes under 64 m² become asphalt, and markings/furniture
 use the retained centre lines only. Buildings are fitted after road cleanup; they never carve streets.
 These are deliberate blockout simplifications, not a lane-accurate interchange simulation.
+
+Railway frames have two columns, concrete feet, a transverse beam and two knee braces.
+Deck candidates are sampled every 4 m; frames use the local perpendicular with at most 10° skew.
+Feet may stand on sidewalks/curbs (+0.16 m) or solid ground (0 m), never on asphalt or lowered banks.
+The 0.65 m feet must fit entirely. Columns end at +6.05 m for a deck top at +6 m.
+Each foot stays within 4 m of its deck edge and the structural span is capped at 14 m;
+there is no search for distant curbs and no wide diagonal frame. A short cantilever covers
+inward-shifted columns. Frames are spaced at least 20 m apart, with additional safe sites
+retained around bends. Tests check feasible-site coverage, pairing, footprint clearance,
+local skew, beam contact and actual rendered geometry. Wide road crossings without two
+nearby safe feet remain clear spans instead of receiving columns in traffic lanes.
+
+River crossings receive two simple steel side trusses: lower/upper chords, posts, alternating
+diagonals and upper transverse ties touching the railway underside. Parallel tracks are grouped
+into one crossing; side walls follow the road-bridge width where available, otherwise the rail
+corridor width. Each crossing uses 2–8 panels (about 12 m each), without decorative latticework,
+bridgehouses or opening machinery. Geometry remains cell/material batched.
+
+Standalone railway trusses extend both chords onto the upper banks beyond the lowered
+riverwalk, with their lower faces at ground level. Generation fails if no safe bank
+can be reached within 256 m; endpoint clearance is covered by geometry tests.

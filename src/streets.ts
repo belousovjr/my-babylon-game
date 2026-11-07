@@ -23,12 +23,12 @@ export function drawChicagoStreets(scene: Scene, material: (color: string) => Ma
     if (!batches.has(key)) batches.set(key, { positions: [], indices: [], color, collision });
     return batches.get(key)!;
   }
-  function box(x: number, y: number, z: number, w: number, h: number, d: number, yaw: number, color: string, collision = true) {
+  function box(x: number, y: number, z: number, w: number, h: number, d: number, yaw: number, color: string, collision = true, roll = 0) {
     const b = batch(x, z, color, collision), offset = b.positions.length / 3;
-    const cos = Math.cos(yaw), sin = Math.sin(yaw), p = cube.positions!;
+    const cos = Math.cos(yaw), sin = Math.sin(yaw), cr = Math.cos(roll), sr = Math.sin(roll), p = cube.positions!;
     for (let i = 0; i < p.length; i += 3) {
-      const px = p[i]! * w, pz = p[i + 2]! * d;
-      b.positions.push(x + px * cos + pz * sin, y + p[i + 1]! * h, z - px * sin + pz * cos);
+      const px = p[i]! * w * cr - p[i + 1]! * h * sr, py = p[i]! * w * sr + p[i + 1]! * h * cr, pz = p[i + 2]! * d;
+      b.positions.push(x + px * cos + pz * sin, y + py, z - px * sin + pz * cos);
     }
     for (const i of cube.indices!) b.indices.push(offset + i);
   }
@@ -93,7 +93,48 @@ export function drawChicagoStreets(scene: Scene, material: (color: string) => Ma
     walls(railway.edges, 5.65, 6, '#505b55');
     surface(railway.rails, 6.16, '#959b92', false);
     walls(railway.railEdges, 6, 6.16, '#959b92');
-    for (const [x, z] of railway.supports) box(x!, 2.825, z!, 0.35, 5.65, 0.35, 0, '#505b55');
+    for (const truss of railway.bridgeTrusses) {
+      const color = '#655044', bottom = truss.bankSupported ? 0.15 : 0.18, top = 5.5;
+      for (const side of truss.sides) {
+        const [a, b] = side, dx = b![0]! - a![0]!, dz = b![1]! - a![1]!;
+        const length = Math.hypot(dx, dz), yaw = -Math.atan2(dz, dx);
+        for (const y of [bottom, top]) box((a![0]! + b![0]!) / 2, y, (a![1]! + b![1]!) / 2, length + 0.3, 0.3, 0.3, yaw, color);
+        for (let j = 0; j <= truss.panels; j++) {
+          const t = j / truss.panels;
+          box(a![0]! + dx * t, (bottom + top) / 2, a![1]! + dz * t, 0.3, top - bottom, 0.3, yaw, color);
+          if (j < truss.panels) {
+            const rise = (j % 2 === 0 ? 1 : -1) * (top - bottom), run = length / truss.panels;
+            box(a![0]! + dx * (j + 0.5) / truss.panels, (bottom + top) / 2, a![1]! + dz * (j + 0.5) / truss.panels,
+              Math.hypot(run, rise), 0.22, 0.22, yaw, color, true, Math.atan2(rise, run));
+          }
+        }
+      }
+      for (let j = 0; j <= truss.panels; j++) {
+        const t = j / truss.panels;
+        const [a, b] = truss.sides.map(side => [side[0]![0]! + (side[1]![0]! - side[0]![0]!) * t, side[0]![1]! + (side[1]![1]! - side[0]![1]!) * t]);
+        const dx = b![0]! - a![0]!, dz = b![1]! - a![1]!;
+        box((a![0]! + b![0]!) / 2, top, (a![1]! + b![1]!) / 2, Math.hypot(dx, dz), 0.3, 0.3, -Math.atan2(dz, dx), color);
+      }
+    }
+    for (let i = 0; i < railway.supports.length; i += 2) {
+      const pair = railway.supports.slice(i, i + 2);
+      const [a, b] = pair.map(s => s.position);
+      const dx = b![0]! - a![0]!, dz = b![2]! - a![2]!, span = Math.hypot(dx, dz);
+      const ux = dx / span, uz = dz / span, yaw = -Math.atan2(dz, dx);
+      const ends = [...pair.map(s => s.position), ...pair.map(s => [s.attachment[0]!, 0, s.attachment[1]!])];
+      const projections = ends.map(p => (p[0]! - a![0]!) * ux + (p[2]! - a![2]!) * uz);
+      const left = Math.min(...projections) - 0.25, right = Math.max(...projections) + 0.25, middle = (left + right) / 2;
+      box(a![0]! + ux * middle, 5.45, a![2]! + uz * middle, right - left, 0.4, 0.5, yaw, '#505b55');
+      for (const [j, support] of pair.entries()) {
+        const [x, base, z] = support.position, height = support.top - base!;
+        box(x!, base! + height / 2, z!, 0.35, height, 0.35, yaw, '#505b55');
+        box(x!, base! + 0.15, z!, 0.65, 0.3, 0.65, yaw, '#868b83');
+        const reach = Math.min(1.25, span / 4), sign = j === 0 ? 1 : -1;
+        const braceX = ux * reach * sign, braceZ = uz * reach * sign;
+        box(x! + braceX / 2, 4.9, z! + braceZ / 2, Math.hypot(reach, 1.1), 0.18, 0.18,
+          -Math.atan2(braceZ, braceX), '#505b55', true, Math.atan2(1.1, reach));
+      }
+    }
   }
   drawElevatedRailway();
   walls(data.shorelines, -5.5, -3.8, '#868b83');

@@ -109,3 +109,46 @@ test('all generated trees and lamps stand on a collision surface', () => {
   scene.dispose();engine.dispose();
   assert.deepEqual(failures,[]);
 });
+
+test('railway pillars reach slightly above the deck in rendered collision geometry', () => {
+  const engine=new NullEngine(),scene=new Scene(engine),mat=new StandardMaterial('surface',scene);
+  const {meshes}=drawChicagoStreets(scene,()=>mat);
+  for(const support of data.environment.railway.supports) {
+    const [x,,z]=support.position;
+    const ray=new Ray(new Vector3(x-.6,6.025,z),Vector3.Right(),1.2);
+    assert.ok(meshes.some(m=>m.checkCollisions&&ray.intersectsMesh(m).hit),`pillar at ${x}, ${z} must reach its cap`);
+  }
+  scene.dispose();engine.dispose();
+});
+
+test('paired railway columns have a continuous transverse bearing beam', () => {
+  const engine=new NullEngine(),scene=new Scene(engine),mat=new StandardMaterial('surface',scene);
+  const {meshes}=drawChicagoStreets(scene,()=>mat),supports=data.environment.railway.supports;
+  assert.equal(supports.length%2,0);
+  for(let i=0;i<supports.length;i+=2) {
+    const a=supports[i].position,b=supports[i+1].position;
+    const ray=new Ray(new Vector3((a[0]+b[0])/2,5.1,(a[2]+b[2])/2),Vector3.Up(),.3);
+    assert.ok(meshes.some(m=>m.checkCollisions&&ray.intersectsMesh(m).hit),'frame beam must bridge the two columns');
+  }
+  scene.dispose();engine.dispose();
+});
+
+test('rail bridge truss uprights are present between the lower and upper chords', () => {
+  const engine=new NullEngine(),scene=new Scene(engine),mat=new StandardMaterial('surface',scene);
+  const {meshes}=drawChicagoStreets(scene,()=>mat);
+  const trussMeshes=meshes.filter(m=>m.name.includes('#655044'));
+  assert.ok(trussMeshes.length>0);
+  for(const truss of data.environment.railway.bridgeTrusses) for(const side of truss.sides) {
+    const [a,b]=side;
+    if(truss.bankSupported) for(const point of side) {
+      const ray=new Ray(new Vector3(point[0],-.01,point[1]),Vector3.Up(),.02);
+      assert.ok(trussMeshes.some(m=>ray.intersectsMesh(m).hit),'standalone lower chord must touch bank elevation');
+    }
+    for(let j=0;j<=truss.panels;j++) {
+      const t=j/truss.panels,x=a[0]+(b[0]-a[0])*t,z=a[1]+(b[1]-a[1])*t;
+      const ray=new Ray(new Vector3(x-.5,3,z),Vector3.Right(),1);
+      assert.ok(trussMeshes.some(m=>ray.intersectsMesh(m).hit),'every truss upright connects the chords');
+    }
+  }
+  scene.dispose();engine.dispose();
+});

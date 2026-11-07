@@ -231,7 +231,7 @@ class StreetGeometryTests(unittest.TestCase):
         self.assertFalse(asphalt.covers(Point(105,0)))
 
     def test_generated_street_surface_is_connected_without_microscopic_islands(self):
-        import json
+        import json, math
         env=json.loads((Path(__file__).resolve().parents[1]/'src/generated/chicago.json').read_text())['environment']
         asphalt=unary_union([Polygon(t) for t in env['roadSurface']])
         sidewalks=unary_union([Polygon(t) for key in ['sidewalks','curbs'] for t in env[key]])
@@ -258,3 +258,136 @@ class StreetGeometryTests(unittest.TestCase):
         network=unary_union([LineString(r['points']) for r in cleaned])
         self.assertGreater(network.distance(Point(-10,1)),9)
         self.assertLess(network.distance(Point(0,1)),1e-6)
+
+    def test_supports_use_sidewalk_corners_instead_of_intersection_lanes(self):
+        asphalt=unary_union([box(-5,-50,5,50),box(-50,-5,50,5)])
+        sidewalks=asphalt.buffer(3.2).difference(asphalt)
+        supports=city.place_railway_supports([[0,0],[-3,20]],sidewalks,asphalt,Polygon(),box(-3,-50,3,50),Polygon())
+        self.assertEqual(len(supports),2)
+        for support in supports:
+            x,y,z=support['position']
+            footprint=box(x-.175,z-.175,x+.175,z+.175)
+            self.assertTrue(sidewalks.covers(footprint))
+            self.assertLess(footprint.intersection(asphalt).area,1e-6)
+            self.assertLessEqual(Point(x,z).distance(asphalt.boundary),1.5+1e-6)
+            self.assertGreaterEqual(support['top'],6)
+
+    def test_all_railway_supports_clear_asphalt_and_connect_to_deck(self):
+        import json, math
+        env=json.loads((Path(__file__).resolve().parents[1]/'src/generated/chicago.json').read_text())['environment']
+        asphalt=unary_union([Polygon(t) for t in env['roadSurface']])
+        sidewalk=unary_union([Polygon(t) for key in ['sidewalks','curbs'] for t in env[key]])
+        deck=unary_union([Polygon(t) for t in env['railway']['deck']])
+        self.assertGreater(len(env['railway']['supports']),10)
+        ground=unary_union([Polygon(t) for cell in env['terrain'] for t in cell['triangles']])
+        supports=env['railway']['supports']
+        for i,support in enumerate(supports):
+            x,base,z=support['position'];point=Point(x,z)
+            peer=supports[i^1]['position']
+            angle=math.atan2(peer[2]-z,peer[0]-x)
+            foot=city.translate(city.rotate(box(-.325,-.325,.325,.325),angle,origin=(0,0),use_radians=True),x,z)
+            self.assertTrue((sidewalk if base==.16 else ground).covers(foot))
+            self.assertLess(foot.intersection(asphalt).area,1e-6)
+            self.assertIn(base,[0,.16])
+            self.assertGreaterEqual(support['top'],6)
+            self.assertLess(deck.distance(Point(support['attachment'])),1e-6)
+            self.assertLessEqual(point.distance(Point(support['attachment'])),4)
+
+    def test_support_frames_require_two_safe_sides(self):
+        asphalt=box(-5,-50,5,50)
+        sidewalks=asphalt.buffer(3.2).difference(asphalt)
+        deck=box(-3,-50,3,50)
+        self.assertEqual(city.place_railway_supports([[-3,20]],sidewalks.intersection(box(-50,-50,0,50)),asphalt,Polygon(),deck,Polygon()),[])
+
+    def test_generated_support_pairs_are_aligned_across_the_deck(self):
+        import json, math
+        env=json.loads((Path(__file__).resolve().parents[1]/'src/generated/chicago.json').read_text())['environment']
+        supports=env['railway']['supports']
+        self.assertEqual(len(supports)%2,0)
+        self.assertGreater(len(supports),20)
+        for a,b in zip(supports[::2],supports[1::2]):
+            pa,pb=a['position'],b['position']
+            beam=LineString([(pa[0],pa[2]),(pb[0],pb[2])])
+            self.assertGreaterEqual(beam.length,2)
+            self.assertEqual(a['top'],b['top'])
+            for support in [a,b]:
+                self.assertLessEqual(beam.distance(Point(support['attachment'])),4+1e-6)
+                self.assertLessEqual(abs(support['skew']),10)
+            self.assertLessEqual(beam.length,14)
+            self.assertGreater(Point(a['attachment']).distance(Point(b['attachment'])),2)
+
+    def test_dense_candidates_cover_bends_without_unnecessary_support_gaps(self):
+        centre=LineString([(0,0),(0,40),(10,60),(40,70),(80,70)])
+        deck=centre.buffer(2.1,cap_style=2,join_style=2)
+        asphalt=centre.buffer(5,cap_style=2,join_style=3)
+        sidewalks=asphalt.buffer(3.2).difference(asphalt)
+        points=[]
+        for ring in city.rings(deck):
+            edge=LineString(ring)
+            points.extend(list(edge.interpolate(d).coords)[0] for d in range(4,int(edge.length),4))
+        supports=city.place_railway_supports(points,sidewalks,asphalt,Polygon(),deck,Polygon())
+        centres=unary_union([Point((a['position'][0]+b['position'][0])/2,(a['position'][2]+b['position'][2])/2) for a,b in zip(supports[::2],supports[1::2])])
+        for distance in range(8,int(centre.length)-8,4):
+            self.assertLess(centre.interpolate(distance).distance(centres),30)
+
+    def test_generated_urban_railway_has_no_avoidable_long_unsupported_sections(self):
+        import json
+        env=json.loads((Path(__file__).resolve().parents[1]/'src/generated/chicago.json').read_text())['environment']
+        supports=env['railway']['supports']
+        centres=unary_union([Point((a['position'][0]+b['position'][0])/2,(a['position'][2]+b['position'][2])/2) for a,b in zip(supports[::2],supports[1::2])])
+        asphalt=unary_union([Polygon(t) for t in env['roadSurface']])
+        sidewalk=unary_union([Polygon(t) for key in ['sidewalks','curbs'] for t in env[key]])
+        water=unary_union([Polygon(t) for t in env['water']]).buffer(7)
+        ground=unary_union([Polygon(t) for cell in env['terrain'] for t in cell['triangles']])
+        deck=unary_union([Polygon(t) for t in env['railway']['deck']])
+        points=[]
+        for ring in env['railway']['edges']:
+            edge=LineString(ring)
+            points.extend(edge.interpolate(distance).coords[0] for distance in range(0,int(edge.length),8))
+        for pair in city.railway_support_candidates(points,sidewalk,asphalt,water,deck,ground):
+            a,b=pair[0]['position'],pair[1]['position']
+            point=Point((a[0]+b[0])/2,(a[2]+b[2])/2)
+            self.assertLess(point.distance(centres),32,f'missing feasible frame near {point.x}, {point.y}')
+
+    def test_railway_river_crossings_receive_two_simple_side_trusses(self):
+        import json
+        env=json.loads((Path(__file__).resolve().parents[1]/'src/generated/chicago.json').read_text())['environment']
+        deck=unary_union([Polygon(t) for t in env['railway']['deck']])
+        water=unary_union([Polygon(t) for t in env['water']])
+        crossings=deck.buffer(2,join_style=2).intersection(water)
+        parts=list(crossings.geoms) if hasattr(crossings,'geoms') else [crossings]
+        parts=[p for p in parts if p.area>=100]
+        trusses=env['railway']['bridgeTrusses']
+        self.assertEqual(len(trusses),len(parts))
+        self.assertGreaterEqual(len(trusses),2)
+        for truss in trusses:
+            self.assertEqual(len(truss['sides']),2)
+            self.assertTrue(2<=truss['panels']<=8)
+            sides=[LineString(side) for side in truss['sides']]
+            self.assertLess(abs(sides[0].length-sides[1].length),1e-6)
+            middle=LineString([sides[0].interpolate(.5,normalized=True),sides[1].interpolate(.5,normalized=True)])
+            self.assertGreater(middle.intersection(deck).length,2)
+            self.assertGreater(middle.intersection(water).length,2)
+
+    def test_standalone_rail_trusses_reach_both_upper_banks(self):
+        # Unequal bank edges exercise the two chords independently.
+        water=Polygon([(-35,-20),(25,-20),(35,20),(-25,20)])
+        banks=Polygon([(-100,-100),(100,-100),(100,100),(-100,100)]).difference(water.buffer(7,join_style=3))
+        deck=LineString([(-90,0),(90,0)]).buffer(5,cap_style=2)
+        trusses=city.railway_bridge_trusses(deck,Polygon(),water,banks)
+        self.assertEqual(len(trusses),1)
+        self.assertTrue(trusses[0]['bankSupported'])
+        for side in trusses[0]['sides']:
+            for endpoint in side:
+                self.assertTrue(banks.covers(Point(endpoint).buffer(.25)))
+
+        import json
+        env=json.loads((Path(__file__).resolve().parents[1]/'src/generated/chicago.json').read_text())['environment']
+        water=unary_union([Polygon(t) for t in env['water']])
+        lowered_banks=city.snap_outline(water.buffer(7,join_style=3))
+        standalone=[t for t in env['railway']['bridgeTrusses'] if t['bankSupported']]
+        self.assertTrue(standalone)
+        for truss in standalone:
+            for side in truss['sides']:
+                for endpoint in side:
+                    self.assertFalse(lowered_banks.intersects(Point(endpoint).buffer(.25)))
