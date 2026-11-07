@@ -6,11 +6,12 @@ import json, math, re, glob, xml.etree.ElementTree as ET
 from pathlib import Path
 from collections import Counter, defaultdict
 from shapely.geometry import Polygon, LineString, Point, box, MultiPolygon
-from shapely.ops import unary_union, polygonize, linemerge
+from shapely.ops import unary_union, polygonize, linemerge, nearest_points
 from shapely import constrained_delaunay_triangles, set_precision
 from shapely.geometry.polygon import orient
 from shapely.affinity import rotate, translate
 from shapely.prepared import prep
+from shapely.strtree import STRtree
 
 ROOT=Path(__file__).resolve().parents[1]
 LON,LAT=-87.63075,41.88425
@@ -37,11 +38,59 @@ def rings(poly):
     return [[[float(x),float(z)] for x,z in ring.coords]
             for p in polygons if p.geom_type=='Polygon' for q in [orient(p,sign=1)] for ring in [q.exterior,*q.interiors]]
 
+def clean_roads(roads,bounds):
+    lines=[LineString(r['points']) for r in roads]
+    tree=STRtree(lines)
+    joined=[]
+    for i,line in enumerate(lines):
+        points=list(line.coords)
+        for end in [0,-1]:
+            point=Point(points[end])
+            neighbours=[lines[j] for j in tree.query(point.buffer(12)) if j!=i]
+            if not neighbours:continue
+            if any(other.distance(point)<=.01 for other in neighbours):continue
+            previous=points[1] if end==0 else points[-2]
+            vx,vz=point.x-previous[0],point.y-previous[1]
+            targets=[]
+            for other in neighbours:
+                target=nearest_points(point,other)[1]
+                distance=point.distance(target)
+                forward=(target.x-point.x)*vx+(target.y-point.y)*vz
+                if distance<=12 and forward>.1*distance*math.hypot(vx,vz):targets.append((distance,target))
+            if targets:
+                target=min(targets,key=lambda item:item[0])[1].coords[0]
+                if end==0:points.insert(0,target)
+                else:points.append(target)
+        joined.append(LineString(points))
+    network=unary_union(joined)
+    merged=linemerge(network) if network.geom_type=='MultiLineString' else network
+    paths=list(merged.geoms) if hasattr(merged,'geoms') else [merged]
+    degrees=Counter(tuple(p) for line in paths for p in [line.coords[0],line.coords[-1]])
+    keep=[]
+    for line in paths:
+        ends=[tuple(line.coords[0]),tuple(line.coords[-1])]
+        leaf=any(degrees[p]==1 and bounds.boundary.distance(Point(p))>.5 for p in ends)
+        direct=Point(ends[0]).distance(Point(ends[1]))
+        redundant=direct<12 and line.length>2*direct
+        if not (line.length<60 and (leaf or redundant)):keep.append(line)
+    network=unary_union(keep)
+    result=[]
+    for road,line in zip(roads,joined):
+        clipped=line.intersection(network)
+        for part in (list(clipped.geoms) if hasattr(clipped,'geoms') else [clipped]):
+            if part.geom_type=='LineString' and part.length>.01:
+                result.append(dict(road,points=[list(p) for p in part.coords]))
+    return result
+
 def street_surfaces(roads,bounds):
     asphalt=unary_union([LineString(r['points']).simplify(0.3).buffer(r['width']/2,cap_style=2,join_style=3) for r in roads])
     # Close narrow notches with bevels instead of preserving pointed OSM leftovers.
     asphalt=asphalt.buffer(1.2,quad_segs=1,join_style=3).buffer(-1.2,quad_segs=1,join_style=3)
     asphalt=snap_outline(asphalt.simplify(0.6).intersection(bounds))
+    polygons=list(asphalt.geoms) if hasattr(asphalt,'geoms') else [asphalt]
+    asphalt=max(polygons,key=lambda p:p.area)
+    # Tiny enclosed holes become asphalt, not miniature pedestrian islands.
+    asphalt=Polygon(asphalt.exterior,[ring for ring in asphalt.interiors if Polygon(ring).area>=64])
     pavement=snap_outline(asphalt.buffer(3.2,join_style=3).intersection(bounds))
     return asphalt,pavement.difference(asphalt),pavement
 
@@ -161,18 +210,21 @@ def main():
         if elevated_metro(t):
             c=coords(refs)
             if len(c)>1:rails.append(LineString(c))
-        if t.get('highway') in ['primary','secondary','tertiary','residential','unclassified','trunk'] and t.get('tunnel')!='yes' and number(t.get('layer'))>=0:
+        if t.get('highway') in ['primary','secondary','tertiary','residential','unclassified','trunk','primary_link','secondary_link','tertiary_link','trunk_link'] and t.get('tunnel')!='yes' and number(t.get('layer'))>=0:
             c=coords(refs)
             if len(c)<2:continue
             line=LineString(c).intersection(bounds)
             lines=list(line.geoms) if hasattr(line,'geoms') else [line]
             for line in lines:
-                if line.geom_type!='LineString' or line.length<5:continue
+                if line.geom_type!='LineString' or line.length<.01:continue
                 width=number(t.get('width')) or max(9,min(26,(number(t.get('lanes')) or (3 if t['highway'] in ['primary','secondary'] else 2))*3.2))
                 roads.append({'id':f'osm-{wid}','name':t.get('name',''),'width':rounded(width),'bridge':t.get('bridge') in ['yes','movable'] or line.intersects(water),'points':[[rounded(x),rounded(z)] for x,z in line.simplify(1).coords]})
     railway=railway_geometry(rails,bounds,water)
     rail_clearance=unary_union([Polygon(t) for t in railway['deck']]).buffer(1.5)
+    roads=clean_roads(roads,bounds)
     road_union,sidewalks,pavement=street_surfaces(roads,bounds)
+    road_cover=prep(road_union.buffer(.05))
+    roads=[r for r in roads if road_cover.covers(LineString(r['points']))]
     pavement=pavement.union(road_union)
     sidewalks=pavement.difference(road_union)
     water=snap_outline(water.simplify(0.5,preserve_topology=True))

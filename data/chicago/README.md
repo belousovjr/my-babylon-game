@@ -113,3 +113,10 @@ Architectural primitive contacts are checked at every LOD using convex-solid SAT
 containment and tangent contact. Each part must connect through other parts to the base;
 intersecting bounding boxes alone do not establish support. Street furniture uses ray-tested
 ground anchors and its current template half-height rather than a fixed sidewalk elevation.
+
+Street generation includes primary/secondary/tertiary/trunk link ways and keeps short connectors.
+Before buffering, forward-facing endpoint gaps up to 12 m are joined; noded branches shorter
+than 60 m with an internal dead end or a redundant return loop are pruned (map-edge exits are retained). The largest
+connected asphalt component is kept, holes under 64 m² become asphalt, and markings/furniture
+use the retained centre lines only. Buildings are fitted after road cleanup; they never carve streets.
+These are deliberate blockout simplifications, not a lane-accurate interchange simulation.

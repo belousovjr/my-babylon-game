@@ -213,3 +213,48 @@ class StreetGeometryTests(unittest.TestCase):
             for b in objects:
                 if a['id']!=b['id']:
                     self.assertLess(footprint.intersection(city.building_footprint(b)).area,1e-6,a['id']+' overlaps '+b['id'])
+
+    def test_short_missing_connection_is_joined_but_remote_stubs_are_removed(self):
+        roads=[dict(points=[[-100,0],[100,0]],width=9),dict(points=[[0,8],[0,80]],width=9),
+               dict(points=[[200,0],[220,0]],width=9)]
+        cleaned=city.clean_roads(roads,box(-100,-100,300,100))
+        network=unary_union([LineString(r['points']) for r in cleaned])
+        self.assertLess(network.distance(Point(0,4)),1e-6)
+        self.assertGreater(network.distance(Point(210,0)),100)
+
+    def test_tiny_traffic_islands_and_isolated_asphalt_are_removed(self):
+        roads=[dict(points=[[0,0],[30,0],[30,30],[0,30],[0,0]],width=24),
+               dict(points=[[100,0],[110,0]],width=5)]
+        asphalt,_,_=city.street_surfaces(roads,box(-50,-50,150,100))
+        self.assertEqual(asphalt.geom_type,'Polygon')
+        self.assertEqual(len(asphalt.interiors),0)
+        self.assertFalse(asphalt.covers(Point(105,0)))
+
+    def test_generated_street_surface_is_connected_without_microscopic_islands(self):
+        import json
+        env=json.loads((Path(__file__).resolve().parents[1]/'src/generated/chicago.json').read_text())['environment']
+        asphalt=unary_union([Polygon(t) for t in env['roadSurface']])
+        sidewalks=unary_union([Polygon(t) for key in ['sidewalks','curbs'] for t in env[key]])
+        self.assertEqual(asphalt.geom_type,'Polygon')
+        self.assertTrue(all(Polygon(r).area>=64-1e-6 for r in asphalt.interiors))
+        parts=list(sidewalks.geoms) if hasattr(sidewalks,'geoms') else [sidewalks]
+        self.assertTrue(all(p.area>=64-1e-6 for p in parts))
+        coverage=city.prep(asphalt.buffer(.05))
+        for road in env['roads']:
+            self.assertTrue(coverage.covers(LineString(road['points'])))
+
+    def test_short_internal_dead_end_is_pruned_without_removing_longer_streets(self):
+        roads=[dict(points=[[-100,0],[100,0]],width=9),dict(points=[[0,0],[0,10]],width=9),
+               dict(points=[[0,10],[0,20]],width=9)]
+        cleaned=city.clean_roads(roads,box(-100,-100,100,100))
+        network=unary_union([LineString(r['points']) for r in cleaned])
+        self.assertGreater(network.distance(Point(0,15)),10)
+        self.assertLess(network.distance(Point(40,0)),1e-6)
+
+    def test_short_return_loop_is_removed_without_breaking_main_street(self):
+        roads=[dict(points=[[0,-100],[0,100]],width=9),
+               dict(points=[[0,0],[-10,0],[-10,2],[0,2]],width=9)]
+        cleaned=city.clean_roads(roads,box(-100,-100,100,100))
+        network=unary_union([LineString(r['points']) for r in cleaned])
+        self.assertGreater(network.distance(Point(-10,1)),9)
+        self.assertLess(network.distance(Point(0,1)),1e-6)

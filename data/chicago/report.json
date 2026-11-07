@@ -82,9 +82,9 @@
     "osm-w846471647",
     "osm-w95486960"
   ],
-  "fittedBuildings": 244,
+  "fittedBuildings": 240,
   "omittedBuildings": 20,
-  "roads": 855,
+  "roads": 1025,
   "families": {
     "stone": 462,
     "glass": 226,
