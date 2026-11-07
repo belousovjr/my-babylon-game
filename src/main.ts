@@ -162,9 +162,10 @@ function updateCellCoverage(mesh: Mesh) {
   mesh.metadata.maxCellZ = Math.floor(bounds.maximumWorld.z / CELL_SIZE);
 }
 function attachModel(root: Mesh, template: ObjectTemplate, color: string, pickable: boolean) {
-  const key = `${template.id}:${color}`;
+  const headings = root.metadata.signalHeadings as number[] | undefined;
+  const key = `${template.id}:${color}:${headings?.join(',') ?? ''}`;
   let sources = templateMeshes.get(key);
-  if (!sources) { sources = buildArchitecture(template, scene, material(color), material(color, 1)); templateMeshes.set(key, sources); }
+  if (!sources) { sources = buildArchitecture(template, scene, material(color), material(color, 1), headings); templateMeshes.set(key, sources); }
   const levels = sources.map((source, i) => {
     const instance = source.createInstance(`${root.name}-lod${i}`);
     instance.parent = root; instance.isPickable = pickable;
@@ -218,13 +219,17 @@ function rebuild() {
   if (world.environment === 'chicago-loop') {
     const streets = drawChicagoStreets(scene, material); proceduralMeshes = streets.meshes;
     for (const [i, prop] of streets.props.entries()) {
-      const template = world.templates.find(t => t.id === prop.templateId);
+      let template = world.templates.find(t => t.id === prop.templateId);
+      if (!template && prop.templateId === 'traffic_signal') {
+        template = structuredClone(createWorld().templates.find(t => t.id === 'traffic_signal')!);
+        world.templates.push(template);
+      }
       if (!template) continue;
       const root = colliderSource.clone(`street-prop-${i}`, null, true)!;
       root.isVisible = false; root.isPickable = false; root.setEnabled(true);
       root.position.copyFromFloats(...prop.position); root.position.y += template.size[1] / 2;
       root.scaling.copyFromFloats(...template.size); root.rotation.y = prop.yaw;
-      root.metadata = { templateId: template.id, kind: 'obstacle' };
+      root.metadata = { templateId: template.id, kind: 'obstacle', signalHeadings: prop.headings };
       attachModel(root, template, template.color, false); furnitureRoots.push(root);
     }
   }

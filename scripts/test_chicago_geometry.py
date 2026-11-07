@@ -444,3 +444,138 @@ class StreetGeometryTests(unittest.TestCase):
     def test_lamps_skip_roads_without_sidewalk_space(self):
         roads=[dict(bridge=False,width=10,points=[[0,0],[100,0]])]
         self.assertEqual(city.street_lamps(roads,Polygon(),box(0,-5,100,5)),[])
+
+
+    def test_two_signals_at_major_crossings_and_none_at_simple_junctions(self):
+        cross=[
+            dict(points=[[-60,0],[60,0]],width=10,highway='primary',oneway='yes'),
+            dict(points=[[0,-60],[0,60]],width=10,highway='secondary',oneway='yes')]
+        asphalt=unary_union([LineString(r['points']).buffer(5,cap_style=2) for r in cross])
+        sidewalk=asphalt.buffer(3.2).difference(asphalt)
+        signals=city.traffic_signals(cross,sidewalk,asphalt)
+        self.assertEqual(len(signals),2)
+        directions={}
+        for signal in signals:
+            ux,uz=signal['approach'];x,_,z=signal['position']
+            self.assertTrue(ux<-.99 or uz<-.99,'no signals facing departing one-way traffic')
+            self.assertLess(x*ux+z*uz,-5)
+            directions.setdefault(tuple(signal['approach']),[]).append(signal)
+        self.assertEqual(len(directions),2)
+        self.assertEqual(city.traffic_signals(cross[:1],sidewalk,asphalt),[],'no signals on a straight street')
+        tee=[cross[0],dict(cross[1],points=[[0,0],[0,60]])]
+        self.assertEqual(city.traffic_signals(tee,sidewalk,asphalt),[],'simple T junctions stay clear')
+        minor=[dict(r,highway='residential') for r in cross]
+        self.assertEqual(city.traffic_signals(minor,sidewalk,asphalt),[],'minor crossings stay clear')
+
+    def test_all_generated_signals_are_safe_paired_and_face_incoming_traffic(self):
+        import json
+        from collections import defaultdict
+        env=json.loads((Path(__file__).resolve().parents[1]/'src/generated/chicago.json').read_text())['environment']
+        sidewalk=unary_union([Polygon(t) for t in env['sidewalks']])
+        asphalt=unary_union([Polygon(t) for t in env['roadSurface']])
+        signals=env['trafficSignals']
+        self.assertGreater(len(signals),10)
+        junctions=defaultdict(list)
+        for signal in signals:
+            x,_,z=signal['position'];point=Point(x,z);ux,uz=signal['approach'];jx,jz=signal['junction']
+            self.assertTrue(sidewalk.buffer(1e-7).covers(point.buffer(.25)))
+            self.assertGreaterEqual(point.distance(asphalt),.6-1e-7)
+            self.assertLess((x-jx)*ux+(z-jz)*uz,-2)
+            self.assertAlmostEqual(math.sin(signal['yaw'])*ux+math.cos(signal['yaw'])*uz,1)
+            junctions[tuple(signal['junction'])].append(signal)
+        self.assertTrue(all(len(group)==2 for group in junctions.values()))
+        for pair in junctions.values():
+            self.assertGreater(math.dist(pair[0]['position'],pair[1]['position']),5)
+            a,b=[s['approach'] for s in pair]
+            self.assertLess(abs(a[0]*b[0]+a[1]*b[1]),.7)
+
+
+    def test_crosswalks_connect_sidewalks_and_paint_only_asphalt_near_signals(self):
+        import json
+        env=json.loads((Path(__file__).resolve().parents[1]/'src/generated/chicago.json').read_text())['environment']
+        sidewalk=unary_union([Polygon(t) for t in env['sidewalks']])
+        asphalt=unary_union([Polygon(t) for t in env['roadSurface']])
+        signals=env['trafficSignals'];crossings=env['crosswalks']
+        self.assertGreater(len(crossings),40)
+        self.assertLessEqual(len(crossings),len(signals)*2)
+        for crossing in crossings:
+            cx,cz=crossing['centre'];ux,uz=crossing['direction'];width=crossing['width']
+            matching=[s for s in signals if s['junction']==crossing['junction']]
+            self.assertEqual(len(matching),2)
+            walkway=Polygon([(cx-uz*side*(width/2+1.2)+ux*end*crossing['depth']/2,cz+ux*side*(width/2+1.2)+uz*end*crossing['depth']/2) for side,end in [(-1,-1),(1,-1),(1,1),(-1,1)]])
+            for signal in matching:
+                self.assertGreaterEqual(walkway.distance(Point(signal['position'][0],signal['position'][2])),.2-1e-7)
+            for sign in [-1,1]:
+                self.assertLessEqual(sidewalk.distance(Point(cx-uz*sign*width/2,cz+ux*sign*width/2)),.5+1e-6)
+            paint=unary_union([Polygon(t) for t in crossing['stripes']])
+            self.assertLess(paint.difference(asphalt).area,1e-7)
+            self.assertGreater(paint.area,3)
+            self.assertLess(paint.area,width*crossing['depth']*.65,'gaps between zebra stripes remain')
+            if crossing['stopLine']:
+                stop=unary_union([Polygon(t) for t in crossing['stopLine']])
+                self.assertLess(stop.difference(asphalt).area,1e-7)
+                self.assertGreaterEqual(stop.distance(paint),1.3-1e-6)
+                sx,sz=crossing['stopCentre']
+                self.assertAlmostEqual((sx-cx)*ux+(sz-cz)*uz,crossing['depth']/2+1.5)
+        self.assertEqual(city.pedestrian_crossings([],env['roads'],sidewalk,asphalt),[])
+
+
+    def test_junction_layout_has_perimeter_crosswalks_and_stop_bars_only_on_incoming_sides(self):
+        roads=[dict(points=[[-60,0],[60,0]],width=10,highway='primary',oneway='yes'),
+               dict(points=[[0,-60],[0,60]],width=10,highway='secondary',oneway='yes')]
+        asphalt=unary_union([LineString(r['points']).buffer(5,cap_style=2) for r in roads])
+        sidewalk=asphalt.buffer(3.2).difference(asphalt)
+        signals=city.traffic_signals(roads,sidewalk,asphalt)
+        crossings=city.pedestrian_crossings(signals,roads,sidewalk,asphalt)
+        self.assertEqual(len(signals),2)
+        self.assertEqual(len(crossings),4)
+        self.assertEqual(sum(bool(c['stopLine']) for c in crossings),2)
+        for crossing in crossings:
+            cx,cz=crossing['centre'];ux,uz=crossing['direction']
+            self.assertGreaterEqual(cx*ux+cz*uz,7.5)
+            self.assertEqual(bool(crossing['stopLine']),ux<-.99 or uz<-.99)
+        for road in roads:road['oneway']='no'
+        crossings=city.pedestrian_crossings(signals,roads,sidewalk,asphalt)
+        self.assertTrue(all(c['stopLine'] for c in crossings))
+        for crossing in crossings:
+            cx,cz=crossing['centre'];sx,sz=crossing['stopCentre'];ux,uz=crossing['direction']
+            self.assertGreater(-(sx-cx)*uz+(sz-cz)*ux,0,'two-way stop bars cover the right-hand incoming lanes')
+
+
+    def test_divided_road_marks_both_carriageways_even_when_street_class_changes(self):
+        roads=[dict(points=[[-60,z],[60,z]],width=10,highway='primary',oneway='yes') for z in [-12,12]]
+        roads.extend([dict(points=[[0,-60],[0,12]],width=10,highway='secondary',oneway='no'),
+                      dict(points=[[0,12],[0,60]],width=10,highway='tertiary',oneway='no')])
+        asphalt=unary_union([LineString(r['points']).buffer(5,cap_style=2) for r in roads])
+        sidewalk=asphalt.buffer(3.2).difference(asphalt)
+        signals=city.traffic_signals(roads,sidewalk,asphalt)
+        crossings=city.pedestrian_crossings(signals,roads,sidewalk,asphalt)
+        self.assertEqual(len({tuple(s['junction']) for s in signals}),2)
+        self.assertEqual(len(crossings),6,'outer perimeter crosses each carriageway, without crossings across the median link')
+        for z in [-12,12]:
+            horizontal=[c for c in crossings if c['junction']==[0,z] and abs(c['direction'][0])>.99]
+            self.assertEqual(len(horizontal),2,'both ends of each carriageway have a crossing')
+
+    def test_every_incoming_arm_has_a_visible_signal_head(self):
+        import json
+        env=json.loads((Path(__file__).resolve().parents[1]/'src/generated/chicago.json').read_text())['environment']
+        roads=[r for r in env['roads'] if r['highway'] in ['primary','secondary','trunk','tertiary']]
+        lines=[LineString(r['points']) for r in roads];tree=city.STRtree(lines)
+        junctions={tuple(s['junction']) for s in env['trafficSignals']}
+        self.assertTrue(any(len(s['headings'])>1 for s in env['trafficSignals']))
+        for junction in junctions:
+            signals=[s for s in env['trafficSignals'] if tuple(s['junction'])==junction]
+            for arm in city.road_arms(Point(junction),roads,lines,tree):
+                if not arm['incoming']:continue
+                ux,uz=arm['direction']
+                self.assertTrue(any(math.sin(s['yaw']+angle)*ux+math.cos(s['yaw']+angle)*uz>.98 for s in signals for angle in s['headings']),f'no head facing incoming arm at {junction}')
+
+
+    def test_michigan_lake_regression_marks_both_carriageways(self):
+        import json
+        env=json.loads((Path(__file__).resolve().parents[1]/'src/generated/chicago.json').read_text())['environment']
+        for centre in [Point(507.82,169.07),Point(523.72,169.23)]:
+            signals=[s for s in env['trafficSignals'] if Point(s['junction']).distance(centre)<1]
+            crossings=[c for c in env['crosswalks'] if Point(c['junction']).distance(centre)<1]
+            self.assertEqual(len(signals),2,'both Michigan carriageways need signals')
+            self.assertGreaterEqual(len(crossings),2,'both Michigan carriageways need crosswalks')

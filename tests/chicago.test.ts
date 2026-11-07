@@ -176,3 +176,18 @@ test('Marina tower LOD preserves every balcony ring while reducing radial detail
   assert.ok(triangles.every((count,i)=>i===0||count<triangles[i-1]!));
   scene.dispose();engine.dispose();
 });
+
+
+test('multi-direction traffic signal heads are rendered on one shared pole', () => {
+  const engine=new NullEngine(),scene=new Scene(engine),mat=new StandardMaterial('signal',scene);
+  const template=createWorld().templates.find(t=>t.profile==='traffic_signal')!;
+  const levels=buildArchitecture(template,scene,mat,mat,[0,Math.PI/2]);
+  const vertices=levels[0].getVerticesData('position')!;
+  for(const axis of [0,2]) {
+    let front=false;
+    for(let i=0;i<vertices.length;i+=3) if(vertices[i+axis]>.35 && vertices[i+1]>.1) front=true;
+    assert.ok(front,'both perpendicular head faces have geometry');
+  }
+  assert.ok(levels.every(level=>level.subMeshes.length<=2),'heads stay batched with their pole');
+  scene.dispose();engine.dispose();
+});

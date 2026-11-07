@@ -7,7 +7,7 @@ import type { Material } from '@babylonjs/core/Materials/material.js';
 import chicago from './generated/chicago.json' with { type: 'json' };
 
 // Furniture positions are ground anchors; their template height is applied by the scene.
-export type StreetFurniture = { templateId: 'tree' | 'lamp'; position: [number, number, number]; yaw: number };
+export type StreetFurniture = { templateId: 'tree' | 'lamp' | 'traffic_signal'; position: [number, number, number]; yaw: number; headings?: number[] };
 export function elevationAt(_x: number, _z: number, surface: 'street' | 'sidewalk' | 'water' | 'riverwalk' = 'street') {
   // shortcut: flat Loop datum plus stylized river terraces; replace with surveyed terrain when available.
   return { street: 0, sidewalk: 0.16, water: -5.5, riverwalk: -3.8 }[surface];
@@ -57,6 +57,7 @@ export function drawChicagoStreets(scene: Scene, material: (color: string) => Ma
     }
   }
   const data = chicago.environment;
+  props.push(...data.trafficSignals.map(signal => ({ templateId: 'traffic_signal' as const, position: [...signal.position] as [number, number, number], yaw: signal.yaw, headings: signal.headings })));
   props.push(...data.lamps.map(lamp => ({ templateId: 'lamp' as const, position: [...lamp.position] as [number, number, number], yaw: lamp.yaw })));
   function drawTerrain() {
   for (const cell of data.terrain) surface(cell.triangles, elevationAt(0, 0), '#85877d', true);
@@ -69,6 +70,10 @@ export function drawChicagoStreets(scene: Scene, material: (color: string) => Ma
   surface(data.sidewalks, elevationAt(0, 0, 'sidewalk'), '#b6b2a4', true);
   surface(data.curbs, 0.18, '#c0bba9', true);
   for (const edge of data.pavingEdges) walls(edge.lines, 0, edge.top, edge.color);
+  for (const crossing of data.crosswalks) {
+    surface(crossing.stripes, 0.055, '#c3baa1', false);
+    surface(crossing.stopLine, 0.055, '#c3baa1', false);
+  }
   for (const road of data.roads) {
     for (let i = 1; i < road.points.length; i++) {
       const a = road.points[i - 1]!, b = road.points[i]!;
@@ -78,10 +83,18 @@ export function drawChicagoStreets(scene: Scene, material: (color: string) => Ma
       const nx = -dz / length, nz = dx / length;
       for (let distance = 9; distance < length - 10; distance += 16) {
         const t = distance / length;
-        box(a[0]! + dx * t, 0.055, a[1]! + dz * t, 4, 0.01, 0.16, yaw, '#c3baa1', false);
+        const x = a[0]! + dx * t, z = a[1]! + dz * t;
+        if (data.crosswalks.some(crossing => {
+          const rx = x - crossing.centre[0]!, rz = z - crossing.centre[1]!;
+          const [ux, uz] = crossing.direction;
+          return Math.abs(rx * ux! + rz * uz!) < crossing.depth / 2 + 4
+            && Math.abs(-rx * uz! + rz * ux!) < crossing.width / 2 + 2.1;
+        })) continue;
+        box(x, 0.055, z, 4, 0.01, 0.16, yaw, '#c3baa1', false);
       }
       if (!road.bridge && length > 45) for (let distance = 25; distance < length - 20; distance += 85) {
         const side = road.width / 2 + 2.2, t = distance / length;
+        if (data.trafficSignals.some(signal => Math.hypot(signal.position[0]! - (a[0]! + dx * t - nx * side), signal.position[2]! - (a[1]! + dz * t - nz * side)) < 2)) continue;
         props.push({ templateId: 'tree', position: [a[0]! + dx * t - nx * side, 0, a[1]! + dz * t - nz * side], yaw: 0 });
       }
     }

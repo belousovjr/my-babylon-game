@@ -170,6 +170,132 @@ def street_lamps(roads,sidewalks,asphalt):
                 lamps.append(dict(templateId='lamp',position=[point.x,.16,point.y],yaw=-math.atan2(road_edge.y-point.y,road_edge.x-point.x)))
     return lamps
 
+def road_arms(origin,roads,lines,tree):
+    arms=[]
+    for index in tree.query(origin.buffer(.1)):
+        index=int(index);line=lines[index];road=roads[index]
+        if line.distance(origin)>.1:continue
+        distance=line.project(origin)
+        for sign in [-1,1]:
+            sample=line.interpolate(max(0,min(line.length,distance+sign*8)))
+            dx,dz=sample.x-origin.x,sample.y-origin.y;length=math.hypot(dx,dz)
+            if length<1:continue
+            direction=[dx/length,dz/length];one=road.get('oneway','no')
+            incoming=one not in ['yes','1','true','-1'] or (sign<0 if one!='-1' else sign>0)
+            previous=next((a for a in arms if sum(x*y for x,y in zip(a['direction'],direction))>.98),None)
+            if previous:
+                previous['width']=max(previous['width'],road['width']);previous['incoming']|=incoming
+                previous['twoWay']|=one not in ['yes','1','true','-1']
+            else:arms.append(dict(direction=direction,width=road['width'],incoming=incoming,twoWay=one not in ['yes','1','true','-1']))
+    return arms
+
+def traffic_signals(roads,sidewalks,asphalt):
+    roads=[r for r in roads if r.get('highway') in ['primary','secondary','trunk','tertiary']]
+    if not roads:return []
+    lines=[LineString(r['points']) for r in roads]
+    network=unary_union(lines)
+    parts=list(network.geoms) if hasattr(network,'geoms') else [network]
+    junctions=defaultdict(list)
+    for line in parts:
+        if line.geom_type!='LineString' or line.length<2:continue
+        for reverse in [False,True]:
+            path=LineString(list(line.coords)[::-1]) if reverse else line
+            origin=Point(path.coords[0]);sample=path.interpolate(min(8,path.length))
+            dx,dz=sample.x-origin.x,sample.y-origin.y;length=math.hypot(dx,dz)
+            junctions[origin.coords[0]].append((dx/length,dz/length))
+    safe=sidewalks.buffer(-.3).difference(asphalt.buffer(.65))
+    if safe.is_empty:return []
+    signals=[];centres=[];tree=STRtree(lines)
+    for node,branches in sorted(junctions.items(),key=lambda item:(-len(item[1]),item[0])):
+        if len(branches)!=4:continue
+        origin=Point(node)
+        if any(origin.distance(previous)<8 for previous in centres):continue
+        if not any(roads[int(i)]['highway'] in ['primary','secondary','trunk'] and lines[int(i)].distance(origin)<.1 for i in tree.query(origin.buffer(.1))):continue
+        arms=road_arms(origin,roads,lines,tree)
+        approaches=[(*arm['direction'],arm['width']) for arm in arms if arm['incoming']]
+        if len(approaches)<2:continue
+        width=max(roads[int(i)]['width'] for i in tree.query(origin.buffer(.1)) if lines[int(i)].distance(origin)<.1)
+        placed=[]
+        for ux,uz,approach_width in approaches:
+            if placed:
+                ax,az=placed[0]['approach']
+                if abs(ax*ux+az*uz)>.7:continue
+            corners=[Point(node[0]-ux*(width/2+.65)-uz*side*(approach_width/2+.65),
+                           node[1]-uz*(width/2+.65)+ux*side*(approach_width/2+.65)) for side in [1,-1]]
+            if placed:
+                previous=Point(placed[0]['position'][0],placed[0]['position'][2])
+                corners.sort(key=lambda point:point.distance(previous),reverse=True)
+            for desired in corners:
+                point=nearest_points(desired,safe)[1]
+                if placed and point.distance(previous)<5:continue
+                if desired.distance(point)>3 or not .6<=point.distance(asphalt)<=2.5:continue
+                if any(point.distance(Point(s['position'][0],s['position'][2]))<.8 for s in signals+placed):continue
+                placed.append(dict(templateId='traffic_signal',position=[point.x,.16,point.y],
+                                 yaw=math.atan2(ux,uz),junction=list(node),approach=[ux,uz],headings=[0],approaches=[[ux,uz]]))
+                break
+            if len(placed)==2:break
+        if len(placed)==2:
+            for ux,uz,_ in approaches:
+                if any(any(ux*a+uz*b>.995 for a,b in signal['approaches']) for signal in placed):continue
+                signal=min(placed,key=lambda signal:(signal['position'][0]-node[0])*ux+(signal['position'][2]-node[1])*uz)
+                angle=math.atan2(ux,uz)-signal['yaw']
+                angle=math.atan2(math.sin(angle),math.cos(angle))
+                angle=round(angle/(math.pi/12))*(math.pi/12)
+                if angle not in signal['headings']:signal['headings'].append(angle)
+                signal['approaches'].append([ux,uz])
+            signals.extend(placed);centres.append(origin)
+    return signals
+
+def pedestrian_crossings(signals,roads,sidewalks,asphalt):
+    result=[]
+    paint_area=asphalt.buffer(-.08)
+    lines=[LineString(r['points']) for r in roads];tree=STRtree(lines)
+    junctions=sorted({tuple(signal['junction']) for signal in signals})
+    for junction in junctions:
+      arms=road_arms(Point(junction),roads,lines,tree)
+      for arm in arms:
+        ux,uz=arm['direction'];nx,nz=-uz,ux;jx,jz=junction;depth=3
+        # Adjacent carriageway nodes share the median link, not an extra crossing across it.
+        if any(0<(other[0]-jx)*ux+(other[1]-jz)*uz<50 and abs(-(other[0]-jx)*uz+(other[1]-jz)*ux)<2
+               and asphalt.covers(LineString([junction,other])) for other in junctions if other!=junction):continue
+        perpendicular=[a['width'] for a in arms if abs(sum(x*y for x,y in zip(a['direction'],arm['direction'])))<.7]
+        if not perpendicular:continue
+        # Leave the corner apex for poles; crosswalks follow the sidewalk routes around it.
+        start=max(perpendicular)/2+1+depth/2
+        for extra in [0,.5,1,1.5,2]:
+            cx,cz=jx+ux*(start+extra),jz+uz*(start+extra)
+            section=LineString([(cx-nx*40,cz-nz*40),(cx+nx*40,cz+nz*40)]).intersection(asphalt)
+            spans=list(section.geoms) if hasattr(section,'geoms') else [section]
+            spans=[line for line in spans if line.geom_type=='LineString' and line.distance(Point(cx,cz))<.01]
+            if not spans:continue
+            span=min(spans,key=lambda line:line.distance(Point(cx,cz)))
+            if not 5<=span.length<=min(32,arm['width']*1.3):continue
+            a,b=Point(span.coords[0]),Point(span.coords[-1])
+            if any(sidewalks.distance(point)>.5 for point in [a,b]):continue
+            centre=span.interpolate(.5,normalized=True);width=span.length
+            def rectangle(offset,half_width,half_depth):
+                return Polygon([(centre.x+nx*(offset+side*half_width)+ux*end*half_depth,centre.y+nz*(offset+side*half_width)+uz*end*half_depth) for side,end in [(-1,-1),(1,-1),(1,1),(-1,1)]])
+            corridor=rectangle(0,width/2,depth/2)
+            if corridor.intersection(asphalt).area<corridor.area*.98:continue
+            walkway=rectangle(0,width/2+1.2,depth/2)
+            if any(walkway.distance(Point(signal['position'][0],signal['position'][2]))<.2 for signal in signals):continue
+            count=math.floor((width-.4)/1.2)
+            stripes=[tri for i in range(count) for tri in triangles(rectangle((i-(count-1)/2)*1.2,.3,depth/2).intersection(paint_area))]
+            stop=[]
+            stop_centre=None
+            if arm['incoming']:
+                # A 1.3 m clear gap exceeds the usual 4 ft between crosswalk and stop bar.
+                sx,sz=centre.x+ux*(depth/2+1.5),centre.y+uz*(depth/2+1.5)
+                lane_width=width/2 if arm['twoWay'] else width
+                lateral=width/4 if arm['twoWay'] else 0
+                stop_centre=[sx+nx*lateral,sz+nz*lateral]
+                bar=Polygon([(stop_centre[0]+nx*side*(lane_width/2-.1)+ux*end*.2,stop_centre[1]+nz*side*(lane_width/2-.1)+uz*end*.2) for side,end in [(-1,-1),(1,-1),(1,1),(-1,1)]])
+                stop=triangles(bar.intersection(paint_area))
+            if stripes:
+                result.append(dict(centre=[centre.x,centre.y],direction=[ux,uz],width=width,depth=depth,junction=list(junction),stripes=stripes,stopLine=stop,stopCentre=stop_centre))
+                break
+    return result
+
 def railway_support_candidates(points,sidewalks,asphalt,lowered_banks,deck,ground):
     allowed=sidewalks.buffer(-.5).union(ground.buffer(-.5)).difference(lowered_banks.buffer(.5))
     if allowed.is_empty:return []
@@ -326,7 +452,7 @@ def main():
             for line in lines:
                 if line.geom_type!='LineString' or line.length<.01:continue
                 width=number(t.get('width')) or max(9,min(26,(number(t.get('lanes')) or (3 if t['highway'] in ['primary','secondary'] else 2))*3.2))
-                roads.append({'id':f'osm-{wid}','name':t.get('name',''),'width':rounded(width),'bridge':t.get('bridge') in ['yes','movable'] or line.intersects(water),'points':[[rounded(x),rounded(z)] for x,z in line.simplify(1).coords]})
+                roads.append({'id':f'osm-{wid}','name':t.get('name',''),'highway':t['highway'],'oneway':t.get('oneway','no'),'width':rounded(width),'bridge':t.get('bridge') in ['yes','movable'] or line.intersects(water),'points':[[rounded(x),rounded(z)] for x,z in line.simplify(1).coords]})
     railway=railway_geometry(rails,bounds,water)
     roads=clean_roads(roads,bounds)
     road_union,sidewalks,pavement=street_surfaces(roads,bounds)
@@ -354,9 +480,10 @@ def main():
       ('gothic','Tribune · готическая корона',[45,141,40],'#baa992',[180,650]),
       ('clock','Wrigley · светлая часовая башня',[50,134,40],'#ded9bf',[180,650]),
       ('tree','Уличное дерево',[5,8,5],'#648263',[90]),
+      ('traffic_signal','Уличный светофор',[.7,4.5,.7],'#e0ded3',[100]),
       ('lamp','Чикагский фонарь',[1,8,1],'#414c4c',[100]),
     ]
-    templates=[dict(id=p,name=n,kind='building' if p not in ['tree','lamp'] else 'obstacle',size=s,color=c,profile=p,lodDistances=d) for p,n,s,c,d in specs]
+    templates=[dict(id=p,name=n,kind='building' if p not in ['tree','lamp','traffic_signal'] else 'obstacle',size=s,color=c,profile=p,lodDistances=d) for p,n,s,c,d in specs]
     objects=[]; source=[]; heights=Counter(); families=Counter(); seen_ids=Counter()
     records=[]
     for wid,t,p in buildings:
@@ -449,7 +576,9 @@ def main():
         nx,nz=-dz/length,dx/length
         if water.contains(Point(mx+nx*2,mz+nz*2)):nx,nz=-nx,-nz
         ramps.append({'top':[rounded(mx+nx*8),0.17,rounded(mz+nz*8)],'bottom':[rounded(mx+dx/length*32+nx*3),-3.78,rounded(mz+dz/length*32+nz*3)]})
-    env=dict(lamps=street_lamps(roads,sidewalks,road_union),railway=railway,roadSurface=triangles(road_union),sidewalks=triangles(sidewalks),curbs=triangles(curbs),pavingEdges=paving_edges,terraceWalls=terrace_lines,ramps=ramps,origin=[LON,LAT],bounds=list(map(rounded,bounds.bounds)),roads=roads,terrain=terrain,water=triangles(water),riverwalk=triangles(riverwalk),parks=[tri for p in parks for tri in triangles(p.intersection(exposed_ground))],shorelines=rings(water),bridgeDeck=triangles(bridge),bridgeEdges=rings(bridge),bridgeAbutments=rings(abutments),bridgeRails=[[[float(x),float(z)] for x,z in line.coords] for line in rail_lines if line.geom_type=='LineString' and line.length>1])
+    signals=traffic_signals(roads,sidewalks,road_union)
+    lamps=[lamp for lamp in street_lamps(roads,sidewalks,road_union) if all(math.dist(lamp['position'],signal['position'])>1.5 for signal in signals)]
+    env=dict(crosswalks=pedestrian_crossings(signals,roads,sidewalks,road_union),trafficSignals=signals,lamps=lamps,railway=railway,roadSurface=triangles(road_union),sidewalks=triangles(sidewalks),curbs=triangles(curbs),pavingEdges=paving_edges,terraceWalls=terrace_lines,ramps=ramps,origin=[LON,LAT],bounds=list(map(rounded,bounds.bounds)),roads=roads,terrain=terrain,water=triangles(water),riverwalk=triangles(riverwalk),parks=[tri for p in parks for tri in triangles(p.intersection(exposed_ground))],shorelines=rings(water),bridgeDeck=triangles(bridge),bridgeEdges=rings(bridge),bridgeAbutments=rings(abutments),bridgeRails=[[[float(x),float(z)] for x,z in line.coords] for line in rail_lines if line.geom_type=='LineString' and line.length>1])
     output=dict(world=world,environment=env,report=dict(buildings=len(objects),protectedBuildings=protected_ids,fittedBuildings=fitted_count,omittedBuildings=skipped_count,roads=len(roads),families=dict(families),heights=dict(heights),bounds=BBOX,origin=[LON,LAT],licence='ODbL-1.0',attribution='© OpenStreetMap contributors',waterArea=rounded(water.area)))
     assert len({o['id'] for o in objects})==len(objects), 'Duplicate OSM building IDs'
     (ROOT/'src/generated').mkdir(exist_ok=True)

@@ -4,7 +4,7 @@ import type { Scene } from '@babylonjs/core/scene.js';
 import type { Material } from '@babylonjs/core/Materials/material.js';
 import type { ObjectTemplate } from './world';
 
-export const PROFILES = ['box', 'glass', 'stone', 'deco', 'bundled', 'rounded', 'marina', 'gothic', 'clock', 'tree', 'lamp'] as const;
+export const PROFILES = ['box', 'glass', 'stone', 'deco', 'bundled', 'rounded', 'marina', 'gothic', 'clock', 'tree', 'lamp', 'traffic_signal'] as const;
 export type Profile = typeof PROFILES[number];
 
 export function createCollisionPrototype(scene: Scene): Mesh {
@@ -30,7 +30,7 @@ export function attachCollisionGeometry(root: Mesh, source: Mesh): Mesh {
 }
 
 // Local geometry is normalized to the editable collision box. Materials and geometry are shared by instances.
-export function buildArchitecture(template: ObjectTemplate, scene: Scene, material: Material, detailMaterial: Material): Mesh[] {
+export function buildArchitecture(template: ObjectTemplate, scene: Scene, material: Material, detailMaterial: Material, signalHeadings: number[] = [0]): Mesh[] {
   const profile = template.profile ?? 'box';
   return Array.from({ length: (template.lodDistances?.length ?? 0) + 1 }, (_, detail) => {
     const pieces: Mesh[] = [], accents: Mesh[] = [];
@@ -42,6 +42,7 @@ export function buildArchitecture(template: ObjectTemplate, scene: Scene, materi
       mesh.setVerticesData('color', Array.from({ length: mesh.getTotalVertices() }, () => [shade, shade, shade, 1]).flat());
       mesh.material = shade === 1 ? material : detailMaterial;
       (shade === 1 ? pieces : accents).push(mesh);
+      return mesh;
     };
     if (profile === 'bundled') {
       const heights = detail === 2 ? [0.75, 1, 0.52] : [0.52, 0.72, 0.92, 0.72, 1, 0.92, 0.52, 0.72, 0.52];
@@ -79,6 +80,17 @@ export function buildArchitecture(template: ObjectTemplate, scene: Scene, materi
       part(0, -0.25, 0, 0.12, 0.5, 0.12, 0.5, true);
       part(0, 0.15, 0, 0.9, 0.7, 0.9, 1, 'sphere');
       if (detail === 0) part(0.2, 0.34, 0, 0.5, 0.3, 0.55, 1.12, 'sphere');
+    } else if (profile === 'traffic_signal') {
+      part(0, -0.12, 0, 0.14, 0.76, 0.14, 0.2);
+      for (const angle of signalHeadings) {
+        const housing = part(Math.sin(angle) * 0.2, 0.20, Math.cos(angle) * 0.2, 0.58, 0.25, 0.28, 0.12);
+        housing.rotation.y = angle;
+        for (const [i, color] of [[1, 0.04, 0.02], [0.12, 0.09, 0.01], [0.01, 0.09, 0.03]].entries()) {
+          const lens = part(Math.sin(angle) * 0.355, 0.275 - i * 0.075, Math.cos(angle) * 0.355, 0.32, 0.045, 0.035, 1);
+          lens.rotation.y = angle;
+          lens.setVerticesData('color', Array.from({ length: lens.getTotalVertices() }, () => [...color, 1]).flat());
+        }
+      }
     } else if (profile === 'lamp') {
       part(0, -0.03, 0, 0.13, 0.94, 0.13, 0.8, true);
       part(0.23, 0.43, 0, 0.55, 0.04, 0.08, 1.2);

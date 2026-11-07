@@ -141,3 +141,42 @@ bridgehouses or opening machinery. Geometry remains cell/material batched.
 Standalone railway trusses extend both chords onto the upper banks beyond the lowered
 riverwalk, with their lower faces at ground level. Generation fails if no safe bank
 can be reached within 256 m; endpoint clearance is covered by geometry tests.
+
+
+Traffic signals use a deliberately sparse, stylized offline layout: two posts per
+full crossing of primary/secondary/trunk streets, facing incoming traffic from the
+two street axes. Simple T junctions, bends, dead ends, residential/tertiary streets
+and links stay clear; nearby duplicate nodes are suppressed only within 8 m. OSM oneway
+(including -1) is respected. Posts occupy sidewalks at least 0.6 m from asphalt;
+lamps and generated trees leave space around them. Far-side placement is informed
+by FHWA MUTCD Chapter 4D:
+https://mutcd.fhwa.dot.gov/pdfs/11th_Edition/mutcd11theditionhl.pdf
+The two-post game convention intentionally does not reproduce its full signal-face
+requirements. No traffic warrants, surveyed signal locations, pedestrian signals,
+turn arrows or live phases are modeled: the template displays static red. Geometry
+is shared and collidable independently of visual LOD.
+
+
+Signalized junction layouts share the actual road-arm geometry: up to four perimeter
+crosswalks are placed independently of signal-pole positions. Their 3 m walking bands
+continue the sidewalk routes beyond the corner apex; narrow/oblique sections are
+searched up to 2 m farther out and skipped when safe connections cannot be found.
+The two signal posts occupy the corner pockets, outside the walking bands and their
+1.2 m sidewalk entries. OSM one-way direction determines incoming approaches. Stop
+bars have 0.4 m thickness and a 1.3 m clear gap before the nearest zebra edge; on
+two-way streets they cover only the right-hand incoming half of the carriageway.
+Outgoing one-way arms have no stop bar. Paint is clipped to asphalt and batched without
+collisions at y=0.055; centre-line dashes leave crossing/stop-bar areas clear.
+Placement follows simplified principles from MassDOT Chapter 6:
+https://www.mass.gov/info-details/pddg-chapter-6-intersections
+and FHWA MUTCD Chapter 4D. Curbs remain stepped: accessible curb ramps and surveyed
+intersection geometry are not modeled yet.
+
+Divided roads retain separate carriageway junction nodes, including continuations
+whose OSM class changes to tertiary. Short connecting links between adjacent nodes
+do not receive redundant crosswalks across the median. Other perimeter crossings
+cover both carriageways. Safe pole space excludes a 0.65 m asphalt buffer before
+searching, so narrow corners do not fail merely because the nearest point was too
+close to traffic. Incoming arms not covered by a primary head receive additional
+heads on an existing pole. Relative head angles snap to 15 degrees so geometry
+remains shared; head-facing tests allow only small angular error.
