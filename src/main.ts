@@ -24,6 +24,8 @@ import type { Profile } from './architecture';
 import type { InstancedMesh } from '@babylonjs/core/Meshes/instancedMesh.js';
 import { drawChicagoStreets, updateStreetDetailLODs } from './streets';
 import { AnimationBlend } from './animationBlend';
+import { LodTransitions, lodDistance, predictLodEye } from './lodTransitions';
+import { DitheredTileFadeMaterialPlugin } from '@babylonjs/core/Materials/ditheredTileFadeMaterialPlugin.js';
 import './style.css';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
@@ -134,6 +136,7 @@ function material(hex: string, priority = 0) {
     mat = new StandardMaterial(key, scene); mat.diffuseColor = Color3.FromHexString(hex);
     mat.specularColor = Color3.Black();
     mat.zOffset = -priority; mat.zOffsetUnits = -priority;
+    DitheredTileFadeMaterialPlugin.GetOrCreate(mat);
     mat.freeze(); materials.set(key, mat);
   }
   return mat;
@@ -142,6 +145,10 @@ const playerNeighborhood = new NearbyMeshes(), cameraNeighborhood = new NearbyMe
 const meshes = new Map<string, Mesh>();
 const templateMeshes = new Map<string, Mesh[]>();
 const modelLevels = new Map<Mesh, InstancedMesh[]>();
+const lodTransitions = new LodTransitions();
+const previousLodEye = new Vector3(), predictedLodEye = new Vector3();
+let previousLodCamera = scene.activeCamera!;
+let initialLods = true;
 let proceduralMeshes: Mesh[] = [];
 const furnitureRoots: Mesh[] = [];
 let previewLod = -1;
@@ -175,7 +182,7 @@ function attachModel(root: Mesh, template: ObjectTemplate, color: string, pickab
   const levels = sources.map((source, i) => {
     const instance = source.createInstance(`${root.name}-lod${i}`);
     instance.parent = root; instance.isPickable = pickable;
-    instance.metadata = { worldId: root.name }; instance.setEnabled(i === sources.length - 1);
+    instance.metadata = { worldId: root.name }; instance.isVisible = i === sources.length - 1;
     return instance;
   });
   attachCollisionGeometry(root, sources[0]!);
@@ -194,22 +201,24 @@ function addMesh(o: WorldObject) {
   meshes.set(o.id, mesh); return mesh;
 }
 function updateLODs() {
-  const eye = scene.activeCamera!.position;
+  const eye = editing ? scene.activeCamera!.position : player.position;
   for (const [root, levels] of modelLevels) {
     if (root.isDisposed() || !root.isEnabled()) continue;
     const template = world.templates.find(t => t.id === root.metadata.templateId)!;
     root.computeWorldMatrix(true);
     const bounds = root.getBoundingInfo().boundingBox;
-    const distance = Vector3.Distance(eye, Vector3.Clamp(eye, bounds.minimumWorld, bounds.maximumWorld));
+    const distance = lodDistance(eye, predictedLodEye, bounds);
     const level = editing && root === selected && previewLod >= 0 ? Math.min(previewLod, levels.length - 1) : (template.lodDistances ?? []).filter(d => distance >= d).length;
     const range = template.profile === 'lamp' ? 120 : template.profile === 'traffic_signal' ? 160 : 240;
-    levels.forEach((mesh, i) => { mesh.setEnabled(i === level && (root.metadata.kind === 'building' || distance < range || (editing && root === selected))); mesh.visibility = root.visibility; });
+    lodTransitions.request(root, levels, root.metadata.kind === 'building' || distance < range || (editing && root === selected) ? level : -1);
     root.metadata.lod = level;
   }
-  updateStreetDetailLODs(proceduralMeshes, eye);
+  updateStreetDetailLODs(proceduralMeshes, eye, (key, levels, level) => lodTransitions.request(key, levels, level), predictedLodEye);
 }
 
 function rebuild() {
+  initialLods = true;
+  lodTransitions.clear();
   activeCell = '';
   select(null);
   for (const levels of modelLevels.values()) for (const mesh of levels) mesh.dispose();
@@ -370,7 +379,9 @@ function updateActiveCell() {
     // shortcut: cells only toggle existing meshes; load/unload assets when the map outgrows memory.
     for (const m of meshes.values()) {
       const b = m.metadata;
-      m.setEnabled((b.minCellX <= cx! + 2 && b.maxCellX >= cx! - 2 && b.minCellZ <= cz! + 2 && b.maxCellZ >= cz! - 2) || m.scaling.y > 120);
+      const enabled = (b.minCellX <= cx! + 2 && b.maxCellX >= cx! - 2 && b.minCellZ <= cz! + 2 && b.maxCellZ >= cz! - 2) || m.scaling.y > 120;
+      if (!enabled && m.isEnabled()) lodTransitions.hide(m);
+      m.setEnabled(enabled);
     }
     playerNeighborhood.invalidate(); cameraNeighborhood.invalidate();
   }
@@ -519,7 +530,7 @@ $('delete').onclick = () => {
   if (!selected) return;
   const mesh = selected; select(null); meshes.delete(mesh.name);
   world.objects = world.objects.filter(o => o.id !== mesh.name);
-  for (const level of modelLevels.get(mesh) ?? []) level.dispose(); modelLevels.delete(mesh);
+  for (const level of modelLevels.get(mesh) ?? []) level.dispose(); modelLevels.delete(mesh); lodTransitions.forget(mesh);
   mesh.dispose(); markDirty();
 };
 function snapshot() { syncObjects(); return parseWorld(world); }
@@ -555,7 +566,7 @@ $('reset').onclick = () => {
 window.addEventListener('beforeunload', event => { if (dirty) { event.preventDefault(); event.returnValue = ''; } });
 function inForm(target: EventTarget | null) { return target instanceof HTMLElement && !!target.closest('input, select, textarea, button'); }
 window.addEventListener('keydown', event => {
-  if (inForm(event.target) || event.ctrlKey || event.metaKey || event.altKey) return;
+  if (starting || inForm(event.target) || event.ctrlKey || event.metaKey || event.altKey) return;
   if (event.code === 'Tab') { event.preventDefault(); if (!event.repeat) setMode(); return; }
   if (!editing && ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) event.preventDefault();
   keys.add(event.code);
@@ -592,13 +603,14 @@ function animate(dt: number) {
   animationBlend?.update(state, dt);
 }
 rebuild(); configureGizmos(); watchGizmos(); respawn();
-void loadCharacter();
+let starting = true, characterReady = false;
+void loadCharacter().finally(() => { characterReady = true; });
 let accumulator = 0;
 let statsTime = 0;
 let lodTime = 0;
 engine.runRenderLoop(() => {
   const dt = Math.min(engine.getDeltaTime() / 1000, 0.1);
-  if (!editing && !document.hidden) {
+  if (!starting && !editing && !document.hidden) {
     accumulator += dt;
     while (accumulator >= 1 / 60) { simulate(1 / 60); accumulator -= 1 / 60; }
     camera.target.copyFrom(player.position).addInPlaceFromFloats(0, 1.15, 0);
@@ -611,14 +623,20 @@ engine.runRenderLoop(() => {
     followCamera.position.copyFrom(cameraBoom.position);
     followCamera.setTarget(camera.target);
   }
+  const eye = editing ? scene.activeCamera!.position : player.position;
+  if (initialLods || previousLodCamera !== scene.activeCamera) previousLodEye.copyFrom(eye);
+  predictLodEye(previousLodEye, eye, dt, predictedLodEye);
+  previousLodEye.copyFrom(eye); previousLodCamera = scene.activeCamera!;
   lodTime += dt;
-  if (lodTime >= 0.15) { updateLODs(); lodTime = 0; }
-  // Visibility is per instance, so one occluder can fade without affecting its template siblings.
-  for (const [root, levels] of modelLevels) {
-    if (levels[0]?.visibility === root.visibility) continue;
-    for (const mesh of levels) mesh.visibility = root.visibility;
-  }
+  if (starting || initialLods || lodTime >= 0.15) { updateLODs(); lodTime = 0; }
+  if (starting || initialLods) { lodTransitions.settle(); initialLods = false; }
+  for (const root of modelLevels.keys()) lodTransitions.opacity(root, root.visibility);
+  lodTransitions.update(dt);
   scene.render();
+  if (starting && characterReady && scene.isReady()) {
+    starting = false;
+    requestAnimationFrame(() => document.getElementById('startup-loader')?.remove());
+  }
   statsTime += dt;
   if (statsTime >= 0.5) {
     statsTime = 0;

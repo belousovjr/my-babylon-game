@@ -4,6 +4,7 @@ import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData.js';
 import type { Scene } from '@babylonjs/core/scene.js';
 import type { Material } from '@babylonjs/core/Materials/material.js';
+import { lodDistance } from './lodTransitions.ts';
 import chicago from './generated/chicago.json' with { type: 'json' };
 
 // Furniture positions are ground anchors; their template height is applied by the scene.
@@ -14,14 +15,31 @@ export function elevationAt(_x: number, _z: number, surface: 'street' | 'sidewal
 }
 
 // Visibility never disables the near mesh: its collision geometry remains available.
-export function updateStreetDetailLODs(meshes: Mesh[], eye: Vector3) {
+export function updateStreetDetailLODs(meshes: Mesh[], eye: Vector3, transition?: (key: Mesh, levels: Mesh[], level: number) => void, predictedEye = eye) {
+  const groups = transition ? new Map<string, Mesh[]>() : null;
   for (const mesh of meshes) {
     const layer = mesh.metadata?.detailLayer;
     if (!layer || layer === 'world') continue;
-    const bounds = mesh.metadata.lodBounds ?? mesh.getBoundingInfo().boundingBox;
-    const distance = Vector3.Distance(eye, Vector3.Clamp(eye, bounds.minimumWorld, bounds.maximumWorld));
-    const near = layer === 'marking' ? 60 : 100, far = layer === 'marking' ? 160 : 320;
-    mesh.isVisible = distance < far && (mesh.metadata.detailLevel === 0 ? distance < near : distance >= near);
+    if (groups) {
+      const key = mesh.name.slice(0, mesh.name.lastIndexOf(','));
+      const levels = groups.get(key) ?? [];
+      levels[mesh.metadata.detailLevel] = mesh;
+      groups.set(key, levels);
+    } else {
+      const bounds = mesh.metadata.lodBounds ?? mesh.getBoundingInfo().boundingBox;
+      const distance = lodDistance(eye, predictedEye, bounds);
+      const near = layer === 'marking' ? 60 : 100, far = layer === 'marking' ? 160 : 320;
+      mesh.isVisible = distance < far && (mesh.metadata.detailLevel === 0 ? distance < near : distance >= near);
+    }
+  }
+  if (groups) for (const levels of groups.values()) {
+    const first = levels[0] ?? levels[1]!;
+    const bounds = first.metadata.lodBounds ?? first.getBoundingInfo().boundingBox;
+    const distance = lodDistance(eye, predictedEye, bounds);
+    const marking = first.metadata.detailLayer === 'marking';
+    const target = distance >= (marking ? 160 : 320) ? -1 : distance < (marking ? 60 : 100) ? 0 : 1;
+    const present = levels.filter(Boolean);
+    transition!(first, present, present.findIndex(mesh => mesh.metadata.detailLevel === target));
   }
 }
 
