@@ -8,17 +8,18 @@ export const PROFILES = ['box', 'glass', 'stone', 'deco', 'bundled', 'rounded', 
 export type Profile = typeof PROFILES[number];
 
 // Local geometry is normalized to the editable collision box. Materials and geometry are shared by instances.
-export function buildArchitecture(template: ObjectTemplate, scene: Scene, material: Material): Mesh[] {
+export function buildArchitecture(template: ObjectTemplate, scene: Scene, material: Material, detailMaterial: Material): Mesh[] {
   const profile = template.profile ?? 'box';
   return Array.from({ length: (template.lodDistances?.length ?? 0) + 1 }, (_, detail) => {
-    const pieces: Mesh[] = [];
+    const pieces: Mesh[] = [], accents: Mesh[] = [];
     const part = (x: number, y: number, z: number, w: number, h: number, d: number, shade = 1, round: boolean | 'sphere' = false) => {
       const mesh = round === 'sphere' ? MeshBuilder.CreateSphere('part', { diameter: 1, segments: 4 }, scene) : round
         ? MeshBuilder.CreateCylinder('part', { diameter: 1, height: 1, tessellation: detail === 0 ? 12 : 8 }, scene)
         : MeshBuilder.CreateBox('part', { size: 1 }, scene);
       mesh.scaling.set(w, h, d); mesh.position.set(x, y, z);
       mesh.setVerticesData('color', Array.from({ length: mesh.getTotalVertices() }, () => [shade, shade, shade, 1]).flat());
-      pieces.push(mesh);
+      mesh.material = shade === 1 ? material : detailMaterial;
+      (shade === 1 ? pieces : accents).push(mesh);
     };
     if (profile === 'bundled') {
       const heights = detail === 2 ? [0.75, 1, 0.52] : [0.52, 0.72, 0.92, 0.72, 1, 0.92, 0.52, 0.72, 0.52];
@@ -68,8 +69,9 @@ export function buildArchitecture(template: ObjectTemplate, scene: Scene, materi
         for (const x of [-0.33, 0, 0.33]) for (const z of [-0.502, 0.502]) part(x, 0, z, 0.012, 0.96, 0.012, 1.25);
       }
     }
-    const result = Mesh.MergeMeshes(pieces, true, true)!;
-    result.name = `template-${template.id}-lod${detail}`; result.material = material;
+    // Group before merging so the body and accents each remain a single submesh.
+    const result = Mesh.MergeMeshes([...pieces, ...accents], true, true, undefined, false, true)!;
+    result.name = `template-${template.id}-lod${detail}`;
     result.isPickable = false; result.checkCollisions = false; result.setEnabled(false);
     return result;
   });

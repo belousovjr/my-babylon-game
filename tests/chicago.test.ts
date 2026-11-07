@@ -19,12 +19,22 @@ test('Chicago snapshot has measured scale, landmark heights, valid templates and
   assert.equal(new Set(w.objects.map(o=>o.id)).size,w.objects.length);
   assert.ok(data.report.heights.estimated>0,'estimated heights explicitly reported');
   const engine=new NullEngine(),scene=new Scene(engine),mat=new StandardMaterial('shared',scene);
+  const accent=new StandardMaterial('accent',scene);accent.zOffset=-1;accent.zOffsetUnits=-1;
   for(const template of w.templates) {
-    const levels=buildArchitecture(template,scene,mat);
+    const levels=buildArchitecture(template,scene,mat,accent);
     assert.equal(levels.length,(template.lodDistances?.length??0)+1);
     const counts=levels.map(m=>m.getTotalIndices()/3);
     assert.ok(counts.every(n=>n>0&&n<2000));
     assert.ok(counts.every((n,i)=>i===0||n<=counts[i-1]),`${template.id}: LOD reduces triangles`);
+    for(const level of levels) {
+      assert.ok(level.subMeshes.length<=2,'body and decoration stay batched');
+      if(['glass','stone'].includes(template.profile!) && level!==levels.at(-1)) {
+        assert.equal(level.subMeshes.length,2);
+        const materials=level.subMeshes.map(s=>s.getMaterial()!);
+        assert.ok(materials.some(m=>m.zOffset===0));
+        assert.ok(materials.some(m=>m.zOffset===-1&&m.zOffsetUnits===-1),'decorative planes have depth priority');
+      }
+    }
     assert.ok(levels.every(m=>m.getVerticesData('color')?.length===m.getTotalVertices()*4));
     const a=levels[0].createInstance('a'),b=levels[0].createInstance('b');
     a.position.x=20;assert.equal(b.position.x,0);a.dispose();b.dispose();levels.forEach(m=>m.dispose());

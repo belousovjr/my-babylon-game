@@ -126,11 +126,14 @@ const cameraBoom = new FollowCamera();
 scene.activeCamera = followCamera;
 
 const materials = new Map<string, StandardMaterial>();
-function material(hex: string) {
-  let mat = materials.get(hex);
+function material(hex: string, priority = 0) {
+  const key = `${hex}:${priority}`;
+  let mat = materials.get(key);
   if (!mat) {
-    mat = new StandardMaterial(hex, scene); mat.diffuseColor = Color3.FromHexString(hex);
-    mat.specularColor = Color3.Black(); mat.freeze(); materials.set(hex, mat);
+    mat = new StandardMaterial(key, scene); mat.diffuseColor = Color3.FromHexString(hex);
+    mat.specularColor = Color3.Black();
+    mat.zOffset = -priority; mat.zOffsetUnits = -priority;
+    mat.freeze(); materials.set(key, mat);
   }
   return mat;
 }
@@ -161,7 +164,7 @@ function updateCellCoverage(mesh: Mesh) {
 function attachModel(root: Mesh, template: ObjectTemplate, color: string, pickable: boolean) {
   const key = `${template.id}:${color}`;
   let sources = templateMeshes.get(key);
-  if (!sources) { sources = buildArchitecture(template, scene, material(color)); templateMeshes.set(key, sources); }
+  if (!sources) { sources = buildArchitecture(template, scene, material(color), material(color, 1)); templateMeshes.set(key, sources); }
   const levels = sources.map((source, i) => {
     const instance = source.createInstance(`${root.name}-lod${i}`);
     instance.parent = root; instance.isPickable = pickable;
@@ -204,7 +207,10 @@ function rebuild() {
   proceduralMeshes = []; furnitureRoots.length = 0;
   for (const m of meshes.values()) m.dispose();
   meshes.clear();
-  for (const sources of templateMeshes.values()) for (const source of sources) source.dispose();
+  for (const sources of templateMeshes.values()) for (const source of sources) {
+    if (source.material?.getClassName() === 'MultiMaterial') source.material.dispose();
+    source.dispose();
+  }
   templateMeshes.clear();
   refreshTemplates();
   for (const o of world.objects) addMesh(o);

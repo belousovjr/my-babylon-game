@@ -89,3 +89,6 @@ Untyped, unnamed elevated `building=yes` structures without height or levels are
 Surface boundaries are snapped only before polygon operations; intersections retain shared coordinates.
 Ground is triangulated before cell batching, and raised paving gets closed side faces down to ground level.
 Generation checks complete map coverage; geometry tests also verify that every paving boundary has a side face.
+
+Architectural trim uses a shared material with `zOffset = zOffsetUnits = -1` to win depth ties
+against the body. Each LOD keeps at most two material submeshes; geometry and colliders are unchanged.
