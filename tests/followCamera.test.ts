@@ -49,7 +49,7 @@ test('boom retracts safely, predicts lateral movement, restores zoom and opacity
   scene.dispose();engine.dispose();
 });
 
-test('only full silhouette occlusion activates the camera and opacity changes', () => {
+test('small occlusions keep opacity and only full occlusion retracts camera', () => {
   const engine=new NullEngine(),scene=new Scene(engine);
   const wall=MeshBuilder.CreateBox('wall',{size:1},scene);
   wall.checkCollisions=true;wall.metadata={kind:'building'};
@@ -118,5 +118,19 @@ test('low-angle camera retracts above opaque ground and restores zoom in the air
   for(let i=0;i<180;i++)boom.update(airTarget,airDesired,[ground],1/60);
   assert.ok(boom.position.subtract(airTarget).length()>8.99,'recovers full zoom above floor');
   assert.equal(ground.visibility,1);
+  scene.dispose();engine.dispose();
+});
+
+test('four or more covered samples fade blockers without retracting camera', () => {
+  const engine=new NullEngine(),scene=new Scene(engine);
+  const wall=MeshBuilder.CreateBox('wall',{width:4,height:1.1,depth:0.1},scene);
+  wall.position.set(0,0.5,4);wall.checkCollisions=true;wall.metadata={kind:'building'};
+  const boom=new FollowCamera(),target=new Vector3(0,1.15,0),desired=new Vector3(0,1.15,9);
+  for(let i=0;i<30;i++)boom.update(target,desired,[wall],1/60);
+  assert.ok(wall.visibility<0.3,'two lower rows (6/9) fade the obstacle');
+  assert.equal(boom.position.z,9,'partial coverage preserves camera distance');
+  wall.scaling.y=0.2;
+  boom.update(target,desired,[wall],1/60);
+  assert.equal(wall.visibility,1,'below threshold restores opacity');
   scene.dispose();engine.dispose();
 });

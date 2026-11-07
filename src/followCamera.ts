@@ -30,15 +30,16 @@ export function boxEntry(origin: Vector3, direction: Vector3, length: number, me
 }
 
 // shortcut: nine samples approximate the 1.8 m avatar silhouette; use an occlusion mask for pixel-exact coverage.
-export function fullOcclusion(target: Vector3, camera: Vector3, blockers: Mesh[]): Set<Mesh> {
+export function silhouetteOcclusion(target: Vector3, camera: Vector3, blockers: Mesh[]) {
   const forward = target.subtract(camera);
   const side = new Vector3(forward.z, 0, -forward.x).normalize().scaleInPlace(0.35);
   const covering = new Set<Mesh>();
+  let covered = 0;
   for (const height of [-1.1, -0.25, 0.6]) for (const width of [-1, 0, 1]) {
     const point = target.add(new Vector3(0, height, 0)).addInPlace(side.scale(width));
     const ray = point.subtract(camera);
     const length = ray.length();
-    if (length < 0.001) return new Set();
+    if (length < 0.001) continue;
     ray.scaleInPlace(1 / length);
     let nearest = length - 0.02;
     let blocker: Mesh | null = null;
@@ -46,10 +47,9 @@ export function fullOcclusion(target: Vector3, camera: Vector3, blockers: Mesh[]
       const hit = boxEntry(camera, ray, nearest, mesh, 0);
       if (hit !== null && hit < nearest) { nearest = hit; blocker = mesh; }
     }
-    if (!blocker) return new Set();
-    covering.add(blocker);
+    if (blocker) { covered++; covering.add(blocker); }
   }
-  return covering;
+  return { covered, covering };
 }
 
 export class FollowCamera {
@@ -88,12 +88,14 @@ export class FollowCamera {
     }
     const predictedTarget = target.add(lookAhead);
     // Test the requested pose, so pulling forward does not clear its own condition and oscillate.
-    const occluded = fullOcclusion(target, desired, blockers);
-    const predictedOccluded = occluded.size > 0 && fullOcclusion(predictedTarget, desired.add(lookAhead), blockers).size > 0;
+    const coverage = silhouetteOcclusion(target, desired, blockers);
+    const fullyOccluded = coverage.covered === 9;
+    const fadedBlockers = coverage.covered / 9 >= 0.4 ? coverage.covering : new Set<Mesh>();
+    const predictedOccluded = fullyOccluded && silhouetteOcclusion(predictedTarget, desired.add(lookAhead), blockers).covered === 9;
     let safe = wanted, predictedSafe = wanted, groundSafe = Infinity;
     for (const mesh of blockers) {
       const ground = mesh.metadata?.kind === 'ground';
-      if (!ground && occluded.size === 0) continue;
+      if (!ground && !fullyOccluded) continue;
       const hit = boxEntry(target, arm, wanted, mesh, CAMERA_RADIUS);
       if (hit !== null) {
         const distance = Math.max(0.02, hit - SKIN);
@@ -110,12 +112,12 @@ export class FollowCamera {
     // Opaque ground takes priority over the minimum distance: never push the camera under the floor.
     this.distance = Math.min(groundSafe, Math.max(MIN_CAMERA_DISTANCE, Math.min(safe, wanted, previous + (goal - previous) * (1 - Math.exp(-response * dt)))));
     this.position.copyFrom(target).addInPlace(arm.scale(this.distance));
-    for (const mesh of occluded) {
+    for (const mesh of fadedBlockers) {
       if (mesh.metadata?.kind !== 'ground' && !this.faded.has(mesh)) this.faded.set(mesh, mesh.visibility);
     }
     for (const [mesh, original] of this.faded) {
       if (mesh.isDisposed()) { this.faded.delete(mesh); continue; }
-      if (!occluded.has(mesh)) {
+      if (!fadedBlockers.has(mesh)) {
         mesh.visibility = original; this.faded.delete(mesh);
       } else {
         mesh.visibility += (Math.min(original, 0.25) - mesh.visibility) * (1 - Math.exp(-18 * dt));
