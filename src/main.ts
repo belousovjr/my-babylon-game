@@ -30,7 +30,7 @@ app.innerHTML = `
     <div class="panel-heading"><span class="eyebrow">МАСТЕРСКАЯ</span><h2>Редактор локации</h2></div>
     <p class="muted">Клик по объекту — выбор. ПКМ + WASD — полёт. Q / E — вниз / вверх.</p>
     <div class="tools"><button data-tool="position" class="active">Перенос</button><button data-tool="rotation">Поворот</button><button data-tool="scale">Размер</button></div>
-    <label class="check"><input id="snap" type="checkbox" checked> Привязка к сетке · 1 м / 15°</label>
+    <label class="check"><input id="snap" type="checkbox" checked> Привязка · перенос 1 м / размер 0,25 м / 15°</label>
     <label>Шаблон<select id="template"></select></label>
     <details><summary>Свойства шаблона</summary>
       <label>Название<input id="template-name" maxlength="80"></label>
@@ -221,10 +221,15 @@ function configureGizmos() {
   if (gizmos.gizmos.positionGizmo) gizmos.gizmos.positionGizmo.snapDistance = snap ? 1 : 0;
   if (gizmos.gizmos.rotationGizmo) {
     const g = gizmos.gizmos.rotationGizmo;
+    // World Y rotation supports the nonuniform dimensions of our box objects.
+    g.updateGizmoRotationToMatchAttachedMesh = false;
     g.snapDistance = snap ? Math.PI / 12 : 0;
     g.xGizmo.isEnabled = false; g.zGizmo.isEnabled = false;
   }
-  if (gizmos.gizmos.scaleGizmo) gizmos.gizmos.scaleGizmo.snapDistance = snap ? 1 : 0;
+  if (gizmos.gizmos.scaleGizmo) {
+    gizmos.gizmos.scaleGizmo.incrementalSnap = true;
+    gizmos.gizmos.scaleGizmo.snapDistance = snap ? 0.25 : 0;
+  }
   gizmos.attachToMesh(editing ? selected : null);
 }
 const hooked = new Set<unknown>();
