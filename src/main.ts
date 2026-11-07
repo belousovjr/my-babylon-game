@@ -19,7 +19,7 @@ import type { Kind, ObjectTemplate, Triple, WorldData, WorldObject } from './wor
 import { initialPlayerState, stepPlayer } from './player';
 import { NearbyMeshes } from './nearbyMeshes';
 import { FollowCamera, MIN_CAMERA_DISTANCE } from './followCamera';
-import { attachCollisionGeometry, buildArchitecture, createCollisionPrototype, PROFILES } from './architecture';
+import { attachCollisionGeometry, buildArchitecture, createCollisionPrototype, setArchitectureStatic, PROFILES } from './architecture';
 import type { Profile } from './architecture';
 import type { InstancedMesh } from '@babylonjs/core/Meshes/instancedMesh.js';
 import { drawChicagoStreets, updateStreetDetailLODs } from './streets';
@@ -190,6 +190,7 @@ function addMesh(o: WorldObject) {
   mesh.checkCollisions = true; mesh.metadata = { worldId: o.id, kind: properties.kind, templateId: o.templateId };
   attachModel(mesh, world.templates.find(t => t.id === o.templateId)!, properties.color, true);
   updateCellCoverage(mesh);
+  setArchitectureStatic(mesh, !editing);
   meshes.set(o.id, mesh); return mesh;
 }
 function updateLODs() {
@@ -238,7 +239,8 @@ function rebuild() {
       root.position.copyFromFloats(...prop.position); root.position.y += template.size[1] / 2;
       root.scaling.copyFromFloats(...template.size); root.rotation.y = prop.yaw;
       root.metadata = { templateId: template.id, kind: 'obstacle', signalHeadings: prop.headings };
-      attachModel(root, template, template.color, false); furnitureRoots.push(root);
+      attachModel(root, template, template.color, false);
+      setArchitectureStatic(root, !editing); furnitureRoots.push(root);
     }
   }
   updateLODs();
@@ -325,6 +327,12 @@ function select(mesh: Mesh | null) {
   describeSelection();
 }
 function configureGizmos() {
+  scene.skipPointerMovePicking = !editing;
+  scene.skipPointerDownPicking = !editing;
+  scene.skipPointerUpPicking = !editing;
+  for (const layer of [gizmos.utilityLayer, gizmos.keepDepthUtilityLayer]) {
+    layer.pickingEnabled = editing; layer.shouldRender = editing;
+  }
   gizmos.attachToMesh(null);
   gizmos.positionGizmoEnabled = tool === 'position';
   gizmos.rotationGizmoEnabled = tool === 'rotation';
@@ -377,6 +385,7 @@ function respawn() {
 }
 function setMode() {
   syncObjects(); editing = !editing; keys.clear(); jumpQueued = false;
+  for (const root of [...meshes.values(), ...furnitureRoots]) setArchitectureStatic(root, !editing);
   $('editor').hidden = !editing; $('intro').hidden = editing;
   $('mode').innerHTML = editing ? 'Играть <kbd>Tab</kbd>' : 'Редактор <kbd>Tab</kbd>';
   if (editing) {
@@ -392,7 +401,6 @@ function setMode() {
     // Keep editor keyboard flight scoped to the canvas, not form controls.
     const mouse = editorCamera.inputs.attached.mouse;
     if (mouse && 'buttons' in mouse) (mouse as { buttons: number[] }).buttons = [2];
-    configureGizmos(); watchGizmos();
     for (const m of meshes.values()) m.setEnabled(true);
     notify('Редактор · изменения применяются сразу. Сохраните карту перед выходом.');
   } else {
@@ -400,6 +408,7 @@ function setMode() {
     editorCamera.detachControl(); scene.activeCamera = followCamera; camera.attachControl(canvas, true);
     select(null); respawn(); notify('Режим игры · карта применена');
   }
+  configureGizmos(); watchGizmos();
   canvas.focus();
 }
 $('mode').onclick = setMode;
@@ -594,7 +603,6 @@ engine.runRenderLoop(() => {
     while (accumulator >= 1 / 60) { simulate(1 / 60); accumulator -= 1 / 60; }
     camera.target.copyFrom(player.position).addInPlaceFromFloats(0, 1.15, 0);
     animate(dt);
-
   } else { accumulator = 0; }
   if (!editing) {
     // The orbit camera owns input/desired zoom; the render camera owns the collision-safe pose.
@@ -606,7 +614,10 @@ engine.runRenderLoop(() => {
   lodTime += dt;
   if (lodTime >= 0.15) { updateLODs(); lodTime = 0; }
   // Visibility is per instance, so one occluder can fade without affecting its template siblings.
-  for (const [root, levels] of modelLevels) for (const mesh of levels) mesh.visibility = root.visibility;
+  for (const [root, levels] of modelLevels) {
+    if (levels[0]?.visibility === root.visibility) continue;
+    for (const mesh of levels) mesh.visibility = root.visibility;
+  }
   scene.render();
   statsTime += dt;
   if (statsTime >= 0.5) {

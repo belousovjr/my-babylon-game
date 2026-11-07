@@ -7,6 +7,13 @@ import type { ObjectTemplate } from './world';
 export const PROFILES = ['box', 'glass', 'stone', 'deco', 'bundled', 'rounded', 'marina', 'gothic', 'clock', 'tree', 'lamp', 'traffic_signal'] as const;
 export type Profile = typeof PROFILES[number];
 
+export function setArchitectureStatic(root: Mesh, frozen: boolean) {
+  for (const mesh of [root, ...root.getChildMeshes()]) {
+    if (frozen) mesh.freezeWorldMatrix();
+    else mesh.unfreezeWorldMatrix();
+  }
+}
+
 export function createCollisionPrototype(scene: Scene): Mesh {
   // Match the 1.03-wide architectural plinths without changing instance/editor dimensions.
   const mesh = MeshBuilder.CreateBox('collision-prototype', { width: 1.03, height: 1, depth: 1.03 }, scene);

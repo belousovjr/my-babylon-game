@@ -201,3 +201,10 @@ Lists refresh after 4 m of travel or increased camera range, with an 8 m safety
 margin. Rebuilds, editor changes, respawns and cell activation invalidate them;
 cell activation precedes physics at the destination. This cache assumes the current
 static city; moving obstacles must invalidate it or join a separate dynamic list.
+
+
+Static architecture/furniture hierarchies freeze their world matrices during play,
+including visual LOD instances and collision meshes. Entering the editor unfreezes
+them; returning to play freezes the edited transforms. The animated player remains
+unfrozen. Gizmo utility layers and automatic pointer picking are disabled in play
+and restored in the editor; explicit ground/camera raycasts remain active.

@@ -7,7 +7,7 @@ import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js'
 import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
 import { Ray } from '@babylonjs/core/Culling/ray.js';
 import { createWorld, parseWorld } from '../src/world.ts';
-import { buildArchitecture, createCollisionPrototype } from '../src/architecture.ts';
+import { buildArchitecture, createCollisionPrototype, setArchitectureStatic } from '../src/architecture.ts';
 import { drawChicagoStreets, updateStreetDetailLODs } from '../src/streets.ts';
 import { boxEntry } from '../src/followCamera.ts';
 import data from '../src/generated/chicago.json' with { type: 'json' };
@@ -228,5 +228,29 @@ test('lamp and traffic signal LODs reduce triangles while retaining their silhou
     assert.ok(levels[1].getTotalIndices()<levels[0].getTotalIndices(),profile+' must actually simplify');
     assert.equal(levels[0].getBoundingInfo().boundingBox.minimum.y,levels[1].getBoundingInfo().boundingBox.minimum.y);
   }
+  scene.dispose();engine.dispose();
+});
+
+
+test('static architecture unfreezes for editing and preserves geometry and collider transforms', () => {
+  const engine=new NullEngine(),scene=new Scene(engine),mat=new StandardMaterial('surface',scene);
+  const root=createCollisionPrototype(scene).clone('building',null,true)!;
+  root.setEnabled(true);root.scaling.set(10,20,10);root.position.y=10;
+  const template=createWorld().templates.find(t=>t.profile==='stone')!;
+  const sources=buildArchitecture(template,scene,mat,mat);
+  const visual=sources[0].createInstance('visual');visual.parent=root;
+  const collider=sources[0].clone('collider',root,true)!;collider.checkCollisions=true;collider.setEnabled(true);
+  setArchitectureStatic(root,true);
+  assert.ok([root,visual,collider].every(mesh=>mesh.isWorldMatrixFrozen));
+  const before=collider.getBoundingInfo().boundingBox.minimumWorld.clone();
+  setArchitectureStatic(root,false);
+  assert.ok([root,visual,collider].every(mesh=>!mesh.isWorldMatrixFrozen));
+  root.position.x+=30;
+  setArchitectureStatic(root,true);
+  assert.ok(Math.abs(collider.getBoundingInfo().boundingBox.minimumWorld.x-before.x-30)<1e-6);
+  assert.ok(Math.abs(visual.getBoundingInfo().boundingBox.minimumWorld.x-collider.getBoundingInfo().boundingBox.minimumWorld.x)<1e-6);
+  assert.equal(collider.checkCollisions,true);
+  root.visibility=.25;
+  assert.equal(root.visibility,.25,'freezing transforms keeps root opacity editable');
   scene.dispose();engine.dispose();
 });
