@@ -1,3 +1,4 @@
+import { wallSections } from './wallGeometry.ts';
 import { RENDER_SETTINGS } from './renderSettings.ts';
 import { Ray } from '@babylonjs/core/Culling/ray.js';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
@@ -92,17 +93,29 @@ export function drawChicagoStreets(scene: Scene, material: (color: string, lod: 
       const count = Math.ceil(Math.hypot(c[0]! - a[0]!, c[1]! - a[1]!) / 2);
       return Array.from({ length: count }, (_, j) => [a[0]! + (c[0]! - a[0]!) * j / count, a[1]! + (c[1]! - a[1]!) * j / count]);
     }));
-    for (const line of lines) for (let i = 1; i < line.length; i++) {
-      const a = line[i - 1]!, c = line[i]!;
-      const bottomA = typeof bottom === 'number' ? bottom : bottom(a[0]!, a[1]!);
-      const bottomC = typeof bottom === 'number' ? bottom : bottom(c[0]!, c[1]!);
-      const dx = c[0]! - a[0]!, dz = c[1]! - a[1]!, length = Math.hypot(dx, dz);
-      if (length < .001) continue;
-      // The visible wall is a closed solid, not coincident one-sided collision planes.
-      const base = Math.min(bottomA, bottomC);
-      box((a[0]! + c[0]!) / 2, (base + top) / 2, (a[1]! + c[1]!) / 2,
-        length + .12, top - base, .12, -Math.atan2(dz, dx), color);
-
+    for (const line of lines) {
+      const sections = wallSections(line);
+      const closed = sections.length > 2 && sections[0] === sections.at(-1);
+      for (let i = 1; i < sections.length; i++) {
+        const a = sections[i - 1]!, c = sections[i]!;
+        const lowA = typeof bottom === 'number' ? bottom : bottom(a.point[0]!, a.point[1]!);
+        const lowC = typeof bottom === 'number' ? bottom : bottom(c.point[0]!, c.point[1]!);
+        const b = batch((a.point[0]! + c.point[0]!) / 2, (a.point[1]! + c.point[1]!) / 2, color, true);
+        const al = [a.left[0]!, lowA, a.left[1]!], ar = [a.right[0]!, lowA, a.right[1]!];
+        const cl = [c.left[0]!, lowC, c.left[1]!], cr = [c.right[0]!, lowC, c.right[1]!];
+        const alt = [al[0]!, top, al[2]!], art = [ar[0]!, top, ar[2]!];
+        const clt = [cl[0]!, top, cl[2]!], crt = [cr[0]!, top, cr[2]!];
+        const faces = [[al, alt, clt, cl], [cr, crt, art, ar], [alt, art, crt, clt], [ar, al, cl, cr]];
+        if (!closed && i === 1) faces.push([ar, art, alt, al]);
+        if (!closed && i === sections.length - 1) faces.push([cl, clt, crt, cr]);
+        for (const face of faces) {
+          for (const triangle of [[0, 1, 2], [0, 2, 3]]) {
+            const offset = b.positions.length / 3;
+            for (const i of triangle) b.positions.push(...face[i]!);
+            b.indices.push(offset, offset + 1, offset + 2);
+          }
+        }
+      }
     }
   }
   const data = chicago.environment;
