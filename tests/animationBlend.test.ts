@@ -42,3 +42,17 @@ test('crossfade preserves normalized weights through interruptions and stops unu
   }
   scene.dispose(); engine.dispose();
 });
+
+test('landing does not interpolate a horizontal flight pose through the floor', () => {
+  const engine=new NullEngine(),scene=new Scene(engine),target={angle:0};
+  const groups=['Fly_Loop','Jump_Land'].map((name,i)=>{
+    const animation=new Animation(name,'angle',30,Animation.ANIMATIONTYPE_FLOAT,Animation.ANIMATIONLOOPMODE_CYCLE);
+    animation.setKeys([{frame:0,value:i},{frame:30,value:i}]);
+    const group=new AnimationGroup(name,scene);group.addTargetedAnimation(animation,target);return group;
+  });
+  const blend=new AnimationBlend(groups);
+  blend.update('Fly_Loop',.1);blend.update('Jump_Land',0);
+  assert.equal(groups[0].isPlaying,false);assert.equal(groups[1].weight,1);
+  assert.equal(groups[1].loopAnimation,false);
+  scene.dispose();engine.dispose();
+});

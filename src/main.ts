@@ -31,7 +31,7 @@ import './style.css';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML = `
-  <canvas id="renderCanvas" tabindex="0" aria-label="Игровой мир. WASD — движение, Shift — бег, Space — прыжок, Tab — редактор."></canvas>
+  <canvas id="renderCanvas" tabindex="0" aria-label="Игровой мир. WASD — движение, Shift — бег, Space — прыжок, второй прыжок — полёт, C — вниз, повтор W с Shift — галоп, Tab — редактор."></canvas>
   <header><div class="brand"><span class="mark">B/</span><div>CHICAGO / LOOP<small>ЛОКАЛЬНАЯ ЛОКАЦИЯ · МАСШТАБ 1:1</small></div></div><button id="mode">Редактор <kbd>Tab</kbd></button></header>
   <div id="intro"><span class="eyebrow">ПЕСОЧНИЦА / ОФЛАЙН</span><h1>Chicago Loop<br>от улицы до силуэта.</h1><p>Река, мосты и архитектура центра Чикаго.</p></div>
   <aside id="editor" hidden aria-label="Редактор карты">
@@ -69,7 +69,7 @@ app.innerHTML = `
     <button id="reset" class="danger quiet">Восстановить Chicago Loop</button>
   </aside>
   <div id="notice" role="status" aria-live="polite">Загрузка персонажа…</div>
-  <footer><div id="help"><span><kbd>W A S D</kbd> движение</span><span><kbd>Shift</kbd> бег</span><span><kbd>Space</kbd> прыжок</span><span>мышь + ЛКМ · камера</span><span><kbd>R</kbd> на старт</span></div><div id="stats">—</div></footer><a id="attribution" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors · ODbL</a>`;
+  <footer><div id="help"><span><kbd>W A S D</kbd> движение</span><span><kbd>Shift</kbd> бег</span><span><kbd>W</kbd> повтор с Shift · галоп</span><span><kbd>Space ×2</kbd> полёт</span><span><kbd>Space / C</kbd> вверх / вниз · C ×2 — выйти из полёта</span><span>ЛКМ · камера / ПКМ · направление</span><span><kbd>R</kbd> на старт</span></div><div id="stats">—</div></footer><a id="attribution" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors · ODbL</a>`;
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const canvas = $<HTMLCanvasElement>('renderCanvas');
 const engine = new Engine(canvas, true, { stencil: true });
@@ -87,7 +87,8 @@ camera.lowerBetaLimit = 0.25; camera.upperBetaLimit = Math.PI / 2 + Math.PI / 10
 camera.wheelPrecision = 35; camera.panningSensibility = 0;
 camera.checkCollisions = false;
 camera.minZ = 0.1; camera.maxZ = 3000;
-camera.attachControl(canvas, true);
+camera.attachControl(true, true, 1);
+camera.movement.input.inputMap.push({ source: 'pointer', button: 2, interaction: 'rotate' });
 camera.inputs.removeByType('ArcRotateCameraKeyboardMoveInput');
 const editorCamera = new UniversalCamera('editor', new Vector3(32, 26, -5), scene);
 editorCamera.setTarget(new Vector3(32, 0, 30));
@@ -303,7 +304,7 @@ async function loadCharacter() {
     animationBlend = new AnimationBlend(result.animationGroups);
     fallback.dispose();
     refreshNearbySources();
-    notify(startupMessage || 'Готово. WASD — идти · Tab — редактировать');
+    notify(startupMessage || 'WASD — идти · Shift — бег · повтор W — галоп · два прыжка — полёт · Space/C — вверх/вниз · Tab — редактор');
   } catch (error) {
     console.error('Character loading failed', error);
     notify('Модель не загрузилась. Управление доступно с временной капсулой.');
@@ -315,6 +316,10 @@ let selected: Mesh | null = null;
 let dirty = false;
 let playerState = initialPlayerState();
 let jumpQueued = false;
+let flightQueued = false, lastSpacePress = -Infinity;
+let stopFlightQueued = false, lastCPress = -Infinity;
+let forwardPressed = false, forwardReleased = false;
+let cameraSteering = false;
 const keys = new Set<string>();
 const gizmos = new GizmoManager(scene);
 gizmos.usePointerToAttachGizmos = false;
@@ -414,12 +419,12 @@ function respawn() {
   playerNeighborhood.invalidate(); cameraNeighborhood.invalidate();
   player.surroundingMeshes = null;
   cameraBoom.reset();
-  player.position.copyFromFloats(...world.spawn); playerState = initialPlayerState(); jumpQueued = false;
+  player.position.copyFromFloats(...world.spawn); playerState = initialPlayerState(); jumpQueued = false; flightQueued = stopFlightQueued = false; lastSpacePress = lastCPress = -Infinity; forwardPressed = forwardReleased = false;
   updateActiveCell();
   camera.target.copyFrom(player.position).addInPlaceFromFloats(0, 1.1, 0);
 }
 function setMode() {
-  syncObjects(); editing = !editing; keys.clear(); jumpQueued = false;
+  syncObjects(); editing = !editing; keys.clear(); jumpQueued = false; flightQueued = stopFlightQueued = false; lastSpacePress = lastCPress = -Infinity; forwardPressed = forwardReleased = false;
   for (const root of [...meshes.values(), ...furnitureRoots]) setArchitectureStatic(root, !editing);
   $('editor').hidden = !editing; $('intro').hidden = editing;
   $('mode').innerHTML = editing ? 'Играть <kbd>Tab</kbd>' : 'Редактор <kbd>Tab</kbd>';
@@ -440,7 +445,7 @@ function setMode() {
     notify('Редактор · изменения применяются сразу. Сохраните карту перед выходом.');
   } else {
     saveEditorCamera();
-    editorCamera.detachControl(); scene.activeCamera = followCamera; camera.attachControl(canvas, true);
+    editorCamera.detachControl(); scene.activeCamera = followCamera; camera.attachControl(true, true, 1);
     select(null); respawn(); notify('Режим игры · карта применена');
   }
   configureGizmos(); watchGizmos();
@@ -594,14 +599,30 @@ window.addEventListener('keydown', event => {
   if (event.code === 'Tab') { event.preventDefault(); if (!event.repeat) setMode(); return; }
   if (!editing && ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) event.preventDefault();
   keys.add(event.code);
-  if (!editing && event.code === 'Space' && !event.repeat) jumpQueued = true;
+  if (!editing && event.code === 'KeyW' && !event.repeat) forwardPressed = true;
+  if (!editing && event.code === 'Space' && !event.repeat) {
+    const now = performance.now();
+    flightQueued ||= now - lastSpacePress <= 350;
+    lastSpacePress = flightQueued ? -Infinity : now;
+    jumpQueued = true;
+  }
+  if (!editing && event.code === 'KeyC' && !event.repeat) {
+    const now = performance.now();
+    stopFlightQueued ||= now - lastCPress <= 350;
+    lastCPress = stopFlightQueued ? -Infinity : now;
+  }
   if (!editing && event.code === 'KeyR' && !event.repeat) respawn();
 });
-window.addEventListener('keyup', event => keys.delete(event.code));
-window.addEventListener('blur', () => { keys.clear(); jumpQueued = false; });
-document.addEventListener('visibilitychange', () => { keys.clear(); jumpQueued = false; accumulator = 0; });
+window.addEventListener('keyup', event => {
+  keys.delete(event.code);
+  if (event.code === 'KeyW') forwardReleased = true;
+});
+window.addEventListener('blur', () => { keys.clear(); jumpQueued = false; flightQueued = stopFlightQueued = false; lastSpacePress = lastCPress = -Infinity; forwardPressed = forwardReleased = false; });
+document.addEventListener('visibilitychange', () => { keys.clear(); jumpQueued = false; flightQueued = stopFlightQueued = false; lastSpacePress = lastCPress = -Infinity; forwardPressed = forwardReleased = false; accumulator = 0; });
 canvas.addEventListener('contextmenu', event => event.preventDefault());
-canvas.addEventListener('pointerdown', () => canvas.focus());
+canvas.addEventListener('pointerdown', event => { canvas.focus(); if (event.button === 2) cameraSteering = true; });
+window.addEventListener('pointerup', event => { if (event.button === 2) cameraSteering = false; });
+window.addEventListener('blur', () => { cameraSteering = false; });
 
 function simulate(dt: number) {
   updateActiveCell();
@@ -609,10 +630,13 @@ function simulate(dt: number) {
     x: Number(keys.has('KeyD')) - Number(keys.has('KeyA')),
     z: Number(keys.has('KeyW')) - Number(keys.has('KeyS')),
     yaw: camera.alpha,
+    pitch: camera.beta - Math.PI / 2,
+    steer: cameraSteering,
     run: keys.has('ShiftLeft') || keys.has('ShiftRight'),
-    jump: jumpQueued,
+    jump: jumpQueued, fly: flightQueued, stopFlight: stopFlightQueued,
+    up: keys.has('Space'), down: keys.has('KeyC'), forwardPressed, forwardReleased,
   };
-  jumpQueued = false;
+  jumpQueued = false; flightQueued = stopFlightQueued = false; forwardPressed = forwardReleased = false;
   player.surroundingMeshes = playerNeighborhood.get(player.position, 12);
   stepPlayer(scene, player, playerState, input, dt);
   if (playerState.moving) {
@@ -620,10 +644,21 @@ function simulate(dt: number) {
     const difference = Math.atan2(Math.sin(playerState.facing - visual.rotation.y), Math.cos(playerState.facing - visual.rotation.y));
     visual.rotation.y += difference * Math.min(1, 14 * dt);
   }
+  const freeMovement = playerState.mode !== 'walk';
+  camera.upperBetaLimit = freeMovement ? Math.PI - .25 : Math.PI / 2 + Math.PI / 10;
+  const tilt = freeMovement && playerState.moving ? -playerState.pitch : 0;
+  const turn = Math.atan2(Math.sin(playerState.facing - visual.rotation.y), Math.cos(playerState.facing - visual.rotation.y));
+  const bank = freeMovement && playerState.moving ? Math.max(-.35, Math.min(.35, -turn * .5)) : 0;
+  // Reset the pose immediately on contact: easing a tilted body upright can cut through the floor.
+  visual.rotation.x = freeMovement ? visual.rotation.x + (tilt - visual.rotation.x) * Math.min(1, 12 * dt) : 0;
+  visual.rotation.z = freeMovement ? visual.rotation.z + (bank - visual.rotation.z) * Math.min(1, 12 * dt) : 0;
   if (player.position.y < -30) respawn();
 }
 function animate(dt: number) {
-  const state = !playerState.grounded ? 'Jump_Loop' : playerState.moving ? playerState.running ? 'Sprint_Loop' : 'Walk_Loop' : 'Idle_Loop';
+  const state = playerState.mode === 'fly' ? playerState.moving ? 'Fly_Loop' : 'Fly_Idle_Loop'
+    : playerState.mode === 'swim' ? playerState.moving ? 'Swim_Fwd_Loop' : 'Swim_Idle_Loop'
+    : playerState.landing > 0 ? 'Jump_Land'
+    : !playerState.grounded ? 'Jump_Loop' : playerState.moving ? playerState.superRunning ? 'Gallop_Loop' : playerState.running ? 'Sprint_Loop' : 'Walk_Loop' : 'Idle_Loop';
   animationBlend?.update(state, dt);
 }
 rebuild(); configureGizmos(); watchGizmos(); respawn();

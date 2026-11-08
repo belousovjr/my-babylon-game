@@ -31,8 +31,6 @@ test('fixed-step movement normalizes diagonals, walls block, jump lands without 
   assert.ok(Math.abs(Math.hypot(body.position.x-20,body.position.z)-3.2)<0.05);
   input.x=0;input.z=0; input.jump=true;step(); input.jump=false;step(15);
   assert.ok(body.position.y>0.8,'jump rises');
-  const before=state.verticalSpeed;input.jump=true;step();input.jump=false;
-  assert.ok(state.verticalSpeed<before,'no double jump');
   step(90);assert.ok(Math.abs(body.position.y)<0.05,'lands'); assert.equal(state.grounded,true);
   state=initialPlayerState();body.position.set(20,0.01,0);input.z=1;input.run=true;step(60);
   assert.ok(Math.abs(body.position.z-7)<0.05,'run speed');
