@@ -21,8 +21,8 @@ test('haze grows linearly through far LOD and smoothly changes its palette with 
   assert.equal(scene.fogMode, Scene.FOGMODE_LINEAR);
   assert.equal(scene.fogStart, 0);
   const opacity = distance => (distance - scene.fogStart) / (scene.fogEnd - scene.fogStart);
-  assert.ok(Math.abs(opacity(650) - .3) < 1e-8);
-  assert.ok(Math.abs(opacity(1300) - .6) < 1e-8);
+  assert.ok(Math.abs(opacity(325) - .3) < 1e-8);
+  assert.ok(Math.abs(opacity(650) - .6) < 1e-8);
   lighting.setTime(12); const day = scene.fogColor.clone();
   lighting.setTime(6); const dawn = scene.fogColor.clone();
   lighting.setTime(18); assert.ok(scene.fogColor.equalsWithEpsilon(dawn, 1e-6));

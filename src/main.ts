@@ -232,7 +232,7 @@ function updateLODs() {
 function rebuild() {
   const farLods = world.templates.filter(t => t.kind === 'building' && t.lodDistances?.length)
     .map(t => t.lodDistances!.at(-1)!).sort((a, b) => a - b);
-  scene.fogEnd = (farLods[Math.floor(farLods.length / 2)] ?? 650) / 0.3;
+  scene.fogEnd = (farLods[Math.floor(farLods.length / 2)] ?? 650) / 0.6;
   initialLods = true;
   lodTransitions.clear();
   activeCell = '';

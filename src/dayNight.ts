@@ -71,8 +71,8 @@ export class DayNight {
     this.scene = scene;
     scene.fogMode = Scene.FOGMODE_LINEAR;
     scene.fogStart = 0;
-    // 30% haze at the city's typical far-LOD distance; rebuild recalibrates from its templates.
-    scene.fogEnd = 650 / 0.3;
+    // 30% haze halfway to the typical far-LOD distance; rebuild recalibrates from its templates.
+    scene.fogEnd = 650 / 0.6;
     this.skyLight = new HemisphericLight('sky-ambient', Vector3.Up(), scene);
     this.sun = new DirectionalLight('sun-moon', new Vector3(0, -1, 0), scene);
     this.sun.shadowFrustumSize = 240; this.sun.shadowMinZ = 1; this.sun.shadowMaxZ = 1600;
