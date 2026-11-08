@@ -11,7 +11,7 @@ import surfaceAverages from './surfaceAverages.json' with { type: 'json' };
 import { WaterSurface } from './waterSurface.ts';
 import { WaterPalette } from './waterPalette.ts';
 
-export type CitySurface = 'plain' | 'light' | 'asphalt' | 'concrete' | 'brick' | 'metal' | 'grass' | 'water' | 'riverbed' | 'paint' | 'facade-stone' | 'facade-brick' | 'facade-glass' | 'facade-dark' | 'roof' | 'rail-steel';
+export type CitySurface = 'foliage' | 'plain' | 'light' | 'asphalt' | 'concrete' | 'brick' | 'metal' | 'grass' | 'water' | 'riverbed' | 'paint' | 'facade-stone' | 'facade-brick' | 'facade-glass' | 'facade-dark' | 'roof' | 'rail-steel';
 
 export function buildingSurface(template: ObjectTemplate, accent = false, luminous = false, role?: 'roof' | 'base'): CitySurface {
   if (role) return role === 'roof' ? 'roof' : 'concrete';
@@ -85,7 +85,7 @@ export class CityMaterials {
     // Grass sits only 1.5 cm above terrain; keep that overlay stable at distant viewing angles.
     const depthPriority = street && surface === 'grass' ? Math.max(1, priority) : priority;
     material.zOffset = -depthPriority; material.zOffsetUnits = -depthPriority;
-    if (surface !== 'plain' && surface !== 'light') {
+    if (surface !== 'plain' && surface !== 'light' && surface !== 'foliage') {
       material.diffuseTexture = this.texture(`${surface}-${level}`, true);
       if (level === 0 && !water) {
         material.ambientTexture = this.texture(`${surface}-ao`, false);
@@ -94,6 +94,15 @@ export class CityMaterials {
         material.specularTexture = this.texture(`${surface}-specular`, false);
         material.useGlossinessFromSpecularMapAlpha = true;
       }
+    }
+    if (surface === 'foliage') {
+      const texture = new Texture(`${this.baseUrl}textures/trees/${level === 2 ? 'crown' : 'leaves'}.png`, this.scene, false, true, Texture.TRILINEAR_SAMPLINGMODE);
+      texture.hasAlpha = true; texture.gammaSpace = true; texture.anisotropicFilteringLevel = 4;
+      material.diffuseTexture = texture;
+      material.transparencyMode = StandardMaterial.MATERIAL_ALPHATEST;
+      material.useAlphaFromDiffuseTexture = true;
+      material.alphaCutOff = .45;
+      material.specularColor = Color3.Black();
     }
     if (surface.startsWith('facade-')) {
       material.emissiveTexture = this.texture(`${surface}-emission-${variant ? `v${variant}-` : ''}${level}`, true);

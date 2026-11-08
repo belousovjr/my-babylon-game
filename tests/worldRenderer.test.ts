@@ -56,3 +56,19 @@ test('window mapping uses actual object height and refits after editor scaling',
   assert.equal(city.modelLevels.get(root)![0].sourceMesh,old,'restoring height reuses shared geometry');
   scene.dispose();engine.dispose();
 });
+
+test('trees select three LODs at close distances and the distant model is tiny',()=>{
+  const {engine,scene,city}=setup();
+  city.world.templates=[{id:'tree',name:'Tree',kind:'obstacle',profile:'tree',size:[5,8,5],color:'#648263',lodDistances:[90]}];
+  city.world.objects=[{id:'test-tree',templateId:'tree',position:[0,4,0],yaw:0}];
+  city.rebuild(true);
+  const root=city.meshes.get('test-tree')!,levels=city.modelLevels.get(root)!;
+  assert.equal(levels.length,3,'old saved templates also gain the distant LOD');
+  assert.ok(levels[2]!.getTotalIndices()/3<=28);
+  for(const [distance,lod] of [[5,0],[40,1],[90,2]]) {
+    const eye=new Vector3(0,4,-distance!);
+    city.updateLODs(eye,eye,true,null,-1,0);
+    assert.equal(root.metadata.lod,lod);
+  }
+  scene.dispose();engine.dispose();
+});

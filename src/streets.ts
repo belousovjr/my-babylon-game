@@ -1,3 +1,4 @@
+import { treeOverlapsRoad } from './treePlacement.ts';
 import { wallSections } from './wallGeometry.ts';
 import { RENDER_SETTINGS } from './renderSettings.ts';
 import { Ray } from '@babylonjs/core/Culling/ray.js';
@@ -274,9 +275,14 @@ export function drawChicagoStreets(scene: Scene, material: (color: string, lod: 
   });
   meshes[0]?.onDisposeObservable.addOnce(() => scene.onBeforeCameraRenderObservable.remove(waterView));
   const groundRay = new Ray(Vector3.Zero(), Vector3.Down(), 7);
-  for (const prop of props) {
+  for (let index = props.length - 1; index >= 0; index--) {
+    const prop = props[index]!;
     prop.position[0] = Math.max(data.bounds[0]! + 0.25, Math.min(data.bounds[2]! - 0.25, prop.position[0]));
     prop.position[2] = Math.max(data.bounds[1]! + 0.25, Math.min(data.bounds[3]! - 0.25, prop.position[2]));
+    if (prop.templateId === 'tree' && treeOverlapsRoad(prop.position[0], prop.position[2], data.roadSurface)) {
+      props.splice(index, 1);
+      continue;
+    }
     groundRay.origin.set(prop.position[0], 0.5, prop.position[2]);
     let floor = -Infinity;
     for (const mesh of meshes) if (mesh.checkCollisions) {

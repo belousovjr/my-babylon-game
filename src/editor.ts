@@ -52,7 +52,7 @@ export function createEditor({ scene, canvas, city, cameras, player, input, chan
     const p = selected.position, s = selected.scaling;
     const object = city.world.objects.find(o => o.id === selected!.name)!;
     const template = city.world.templates.find(t => t.id === object.templateId)!;
-    $('selection').textContent = `${object.name ?? template.name} · ${template.kind}\nLOD ${selected.metadata.lod ?? 0} / ${(template.lodDistances?.length ?? 0)} · △ ${(city.modelLevels.get(selected) ?? []).map(m => m.getTotalIndices() / 3).join(' / ')}\n${object.size || object.color ? 'Есть индивидуальные изменения' : 'Наследует шаблон'}\n${selected.name}\nXYZ ${p.x.toFixed(1)} / ${p.y.toFixed(1)} / ${p.z.toFixed(1)}\nРазмер ${s.x.toFixed(1)} × ${s.y.toFixed(1)} × ${s.z.toFixed(1)} м`;
+    $('selection').textContent = `${object.name ?? template.name} · ${template.kind}\nLOD ${selected.metadata.lod ?? 0} / ${Math.max(0, (city.modelLevels.get(selected)?.length ?? 1) - 1)} · △ ${(city.modelLevels.get(selected) ?? []).map(m => m.getTotalIndices() / 3).join(' / ')}\n${object.size || object.color ? 'Есть индивидуальные изменения' : 'Наследует шаблон'}\n${selected.name}\nXYZ ${p.x.toFixed(1)} / ${p.y.toFixed(1)} / ${p.z.toFixed(1)}\nРазмер ${s.x.toFixed(1)} × ${s.y.toFixed(1)} × ${s.z.toFixed(1)} м`;
   }
   function select(mesh: Mesh | null) {
     selected = mesh; gizmos.attachToMesh(editing ? mesh : null);

@@ -87,7 +87,7 @@ test('player stops outside the visible plinth of large rotated buildings', () =>
 
 
 test('shared collision geometry blocks facades, tree trunks and lamps independently of visual LOD', () => {
-  for(const [profile,front] of [['stone',15.45],['tree',.3],['lamp',.065]] as const) {
+  for(const [profile,front] of [['stone',15.45],['tree',.15],['lamp',.065]] as const) {
     const engine=new NullEngine(),scene=new Scene(engine);
     scene.collisionsEnabled=true;
     const ground=MeshBuilder.CreateBox('ground',{width:100,height:1,depth:100},scene);
@@ -101,7 +101,7 @@ test('shared collision geometry blocks facades, tree trunks and lamps independen
     root.scaling.copyFromFloats(...template.size);
     root.position.y=template.size[1]/2;
     const collider=attachCollisionGeometry(root,sources[0]);
-    assert.equal(collider.geometry,sources[0].geometry,'collision geometry is shared');
+    assert.equal(collider.geometry,(sources[0].metadata?.collisionSource ?? sources[0]).geometry,'collision geometry is shared');
     const body=MeshBuilder.CreateBox('player',{},scene);
     body.collisionMask=1;body.ellipsoid.set(.35,.9,.35);body.ellipsoidOffset.set(0,.9,0);
     body.position.set(0,.01,-front-3);

@@ -1,3 +1,4 @@
+import { buildTree } from './treeGeometry.ts';
 import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
 import type { Scene } from '@babylonjs/core/scene.js';
@@ -35,6 +36,7 @@ export function attachCollisionGeometry(root: Mesh, source: Mesh): Mesh {
   // Keep the editor/camera bounds separate from the player's stable, shared collision geometry.
   root.checkCollisions = true;
   root.collisionGroup = 2;
+  source = source.metadata?.collisionSource ?? source;
   const collider = source.clone(`${root.name}-collision`, root, true)!;
   collider.isVisible = false;
   collider.isPickable = false;
@@ -47,8 +49,9 @@ export function attachCollisionGeometry(root: Mesh, source: Mesh): Mesh {
 }
 
 // Local geometry is normalized to the editable collision box. Materials and geometry are shared by instances.
-export function buildArchitecture(template: ObjectTemplate, scene: Scene, material: Material, detailMaterial: Material, signalHeadings: number[] = [0], surfaceMaterial?: (lod: number, accent: boolean, luminous: boolean, role?: 'roof' | 'base') => Material): Mesh[] {
+export function buildArchitecture(template: ObjectTemplate, scene: Scene, material: Material, detailMaterial: Material, signalHeadings: number[] = [0], surfaceMaterial?: (lod: number, accent: boolean, luminous: boolean, role?: 'roof' | 'base') => Material, treeVariant = 0, leafMaterial?: Material, farLeafMaterial?: Material): Mesh[] {
   const profile = template.profile ?? 'box';
+  if (profile === 'tree') return buildTree(scene, detailMaterial, leafMaterial ?? material, (template.lodDistances?.length ?? 0) + 1, treeVariant, farLeafMaterial);
   const masonry = hasMasonryWindows(template);
   const panelled = ['glass', 'stone', 'deco'].includes(profile);
   const grid = ['glass', 'bundled'].includes(profile) ? facadeLayout.glass : facadeLayout.masonry;
@@ -67,7 +70,7 @@ export function buildArchitecture(template: ObjectTemplate, scene: Scene, materi
       const bottom = panelled ? Math.max(y - h / 2, bodyBottom) : y - h / 2;
       const top = panelled ? Math.min(y + h / 2, bodyTop) : y + h / 2;
       const rows = profile === 'bundled' ? Math.max(1, Math.round(h * grid.rows)) : windowRows(template.size[1], Math.max(0, top - bottom));
-      if (surfaceMaterial && profile !== 'tree' && !luminous) {
+      if (surfaceMaterial && !luminous) {
         const positions = mesh.getVerticesData('position')!, normals = mesh.getVerticesData('normal')!, sourceUVs = mesh.getVerticesData('uv')!, uvs: number[] = [];
         const facade = template.kind === 'building' && !accent && !role;
         for (let i = 0; i < positions.length; i += 3) {
@@ -164,10 +167,6 @@ export function buildArchitecture(template: ObjectTemplate, scene: Scene, materi
       if (detail < 2) for (const x of [-0.27, 0.27]) for (const z of [-0.28, 0.28]) part(x, 0.33, z, 0.07, 0.18, 0.07, 1.1);
       if (profile === 'gothic' && detail === 0) for (const x of [-0.45, 0.45]) for (const z of [-0.45, 0.45]) part(x, -0.13, z, 0.055, 0.74, 0.055, 1.1);
       if (profile === 'clock' && detail === 0) for (const z of [-0.296, 0.296]) part(0, 0.22, z, 0.15, 0.05, 0.015, 0.45);
-    } else if (profile === 'tree') {
-      part(0, -0.25, 0, 0.12, 0.5, 0.12, 0.5, true);
-      part(0, 0.15, 0, 0.9, 0.7, 0.9, 1, 'sphere');
-      if (detail === 0) part(0.2, 0.34, 0, 0.5, 0.3, 0.55, 1.12, 'sphere');
     } else if (profile === 'traffic_signal') {
       part(0, -0.12, 0, 0.14, 0.76, 0.14, 0.2);
       for (const angle of signalHeadings) {

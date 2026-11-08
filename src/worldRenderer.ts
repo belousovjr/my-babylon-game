@@ -1,3 +1,4 @@
+import { treeVariant } from './treeGeometry.ts';
 import { windowMappingKey } from './windowMapping.ts';
 import { RENDER_SETTINGS } from './renderSettings.ts';
 import type { Scene } from '@babylonjs/core/scene.js';
@@ -52,9 +53,10 @@ export class WorldRenderer {
     mesh.metadata.maxCellZ = Math.floor(bounds.maximumWorld.z / CELL_SIZE);
   }
   private attachModel(root: Mesh, template: ObjectTemplate, color: string, pickable: boolean) {
+    if (template.profile === 'tree') template = { ...template, lodDistances: [25, 65] };
     const headings = root.metadata.signalHeadings as number[] | undefined;
     const bodySurface = template.profile === 'stone' && root.scaling.y < 36 ? 'facade-brick' : buildingSurface(template);
-    const variant = template.kind === 'building' ? facadeVariant(root.name) : 0;
+    const variant = template.profile === 'tree' ? treeVariant(root.name) : template.kind === 'building' ? facadeVariant(root.name) : 0;
     const tint = template.profile === 'tree' || color !== this.originalTemplateColors.get(template.id) ? color : '#ffffff';
     const mapping = windowMappingKey(template, root.scaling.y);
     root.metadata.windowMapping = mapping;
@@ -62,9 +64,11 @@ export class WorldRenderer {
     const key = `${mapping}:${template.id}:${color}:${bodySurface}:${variant}:${headings?.join(',') ?? ''}`;
     let sources = this.templateMeshes.get(key);
     if (!sources) {
-      sources = buildArchitecture(mapping ? { ...template, size: [template.size[0], root.scaling.y, template.size[2]] } : template, this.scene, this.materials.get(color, 'plain'), this.materials.get(color, 'plain', 0, 1), headings,
+      sources = buildArchitecture(mapping ? { ...template, size: [template.size[0], root.scaling.y, template.size[2]] } : template, this.scene, this.materials.get(color, 'plain'), this.materials.get(template.profile === 'tree' ? '#675341' : color, 'plain', 0, 1), headings,
         (lod, accent, luminous, role) => this.materials.get(luminous ? '#ffffff' : tint,
-          accent || luminous || role ? buildingSurface(template, accent, luminous, role) : bodySurface, lod, accent || luminous || role ? 1 : 0, variant));
+          accent || luminous || role ? buildingSurface(template, accent, luminous, role) : bodySurface, lod, accent || luminous || role ? 1 : 0, variant), variant,
+        template.profile === 'tree' ? this.materials.get(color, 'foliage') : undefined,
+        template.profile === 'tree' ? this.materials.get(color, 'foliage', 2) : undefined);
       for (const source of sources) source.receiveShadows = true;
       this.templateMeshes.set(key, sources);
     }
@@ -104,7 +108,7 @@ export class WorldRenderer {
       root.computeWorldMatrix(true);
       const bounds = root.getBoundingInfo().boundingBox;
       const distance = lodDistance(eye, predictedLodEye, bounds);
-      const level = editing && root === selected && previewLod >= 0 ? Math.min(previewLod, levels.length - 1) : (template.lodDistances ?? []).filter(d => distance >= d).length;
+      const level = editing && root === selected && previewLod >= 0 ? Math.min(previewLod, levels.length - 1) : (template.profile === 'tree' ? [25, 65] : template.lodDistances ?? []).filter(d => distance >= d).length;
       const range = template.profile === 'lamp' ? RENDER_SETTINGS.furnitureRange.lamp + night * RENDER_SETTINGS.furnitureRange.lampNightExtra : template.profile === 'traffic_signal' ? RENDER_SETTINGS.furnitureRange.signal : RENDER_SETTINGS.furnitureRange.other;
       this.lodTransitions.request(root, levels, root.metadata.kind === 'building' || distance < range || (editing && root === selected) ? level : -1);
       root.metadata.lod = level;

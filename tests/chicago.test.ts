@@ -1,3 +1,4 @@
+import { treeOverlapsRoad } from '../src/treePlacement.ts';
 import '@babylonjs/core/Meshes/instancedMesh.js';
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
@@ -123,6 +124,7 @@ test('all generated trees and lamps stand on a collision surface', () => {
   const failures=[];
   for(const prop of props) {
     const [x,base,z]=prop.position;
+    if(prop.templateId==='tree') assert.equal(treeOverlapsRoad(x,z,data.environment.roadSurface),false,'tree trunk must stay clear of every road, including junctions');
     const ray=new Ray(new Vector3(x,base+.5,z),Vector3.Down(),1);
     const hits=meshes.filter(m=>m.checkCollisions).map(m=>ray.intersectsMesh(m)).filter(h=>h.hit);
     if(!hits.some(h=>Math.abs(h.pickedPoint!.y-base)<1e-5)) failures.push({type:prop.templateId,x,z,base,floor:hits.map(h=>h.pickedPoint!.y)});
