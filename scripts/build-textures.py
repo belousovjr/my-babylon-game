@@ -17,7 +17,7 @@ FACADE_SIZES = (1024, 512, 128)
 PALETTE = {
     "asphalt": (51, 55, 56), "concrete": (174, 170, 157), "brick": (147, 125, 101),
     "metal": (66, 69, 67), "grass": (77, 91, 64), "rail-steel": (112, 65, 47),
-    "roof": (77, 79, 75), "paint": (201, 199, 181), "water": (53, 89, 91),
+    "riverbed": (106, 100, 78), "roof": (77, 79, 75), "paint": (201, 199, 181), "water": (53, 89, 91),
 }
 
 
@@ -203,7 +203,7 @@ def build(cache, out):
         prepared[name] = (color, ao, normal)
         save_set(out, name, color, ao, normal, image('Roughness'))
         sources.append({'id': asset, 'page': f'https://ambientcg.com/view?id={asset}', 'download': url, 'sha256': hashlib.sha256(raw).hexdigest(), 'ao': 'source' if image('AmbientOcclusion') is not None else 'generated cavity from source height'})
-    for name, source in [('roof', 'concrete'), ('rail-steel', 'metal')]:
+    for name, source in [('roof', 'concrete'), ('rail-steel', 'metal'), ('riverbed', 'grass')]:
         color, ao, normal = prepared[source]
         save_set(out, name, tint(color, PALETTE[name]), ao, normal)
     facade_density = {}
@@ -234,7 +234,7 @@ def build(cache, out):
         save_set(out, name, color, ao, normal_from_height(height))
     environment(out)
     street_lightmap(out)
-    manifest = {'license': 'CC0-1.0', 'sources': sources, 'derived': ['facade-stone', 'facade-brick', 'facade-glass', 'facade-dark', 'roof', 'rail-steel', 'paint', 'water'], 'lodSizes': list(SIZES), 'facadeLodSizes': list(FACADE_SIZES), 'litWindowFractions': facade_density, 'maps': ['albedo', 'ambient occlusion', 'OpenGL normal', 'specular RGB + glossiness alpha (1 - roughness)'], 'runtime': 'LOD0 albedo+AO+normal+specular/glossiness; LOD1/2 albedo with baked AO; all levels have mipmaps'}
+    manifest = {'license': 'CC0-1.0', 'sources': sources, 'derived': ['facade-stone', 'facade-brick', 'facade-glass', 'facade-dark', 'roof', 'rail-steel', 'riverbed', 'paint', 'water'], 'lodSizes': list(SIZES), 'facadeLodSizes': list(FACADE_SIZES), 'litWindowFractions': facade_density, 'maps': ['albedo', 'ambient occlusion', 'OpenGL normal', 'specular RGB + glossiness alpha (1 - roughness)'], 'runtime': 'LOD0 albedo+AO+normal+specular/glossiness; LOD1/2 albedo with baked AO; all levels have mipmaps'}
     (out / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     names = list(ASSETS) + manifest['derived']
     sheet = Image.new('RGB', (5 * 192, ((len(names) + 4) // 5) * 220), '#172b30')

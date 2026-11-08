@@ -20,6 +20,7 @@ test('city materials share textures, simplify distant shaders, and keep lights a
       assert.ok(uv.every(Number.isFinite));
       const parts = mesh.subMeshes.map(sub => sub.getMaterial());
       for (const material of parts) {
+        assert.ok(material.pluginManager?.getPlugin('WaterPalette'), 'all city surfaces use the spatial water palette');
         if (template.profile === 'tree') assert.equal(material.getActiveTextures().length, 0);
         if (lod > 0) { assert.equal(material.bumpTexture, null); assert.equal(material.ambientTexture, null); assert.equal(material.specularTexture, null); }
       }

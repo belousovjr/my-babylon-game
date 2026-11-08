@@ -102,3 +102,17 @@ have a longer nighttime visibility range.
 
 The reflection cubemap is dimmed at night, not recaptured. Sky, sunlight and
 nearby actor lighting are handled by `src/dayNight.ts`.
+
+## Riverbed
+
+The matte brown-grey riverbed reuses the fine-grained source detail of Grass004,
+recolored to sediment rather than vegetation, with the same LOD/map setup as
+other terrain. No reflective material or street-light lightmap is applied below
+water. The concave channel is approximately 1.5 m deep at the banks and up to 8 m
+deep towards the centre, with small sediment ripples. Depth is stylized, not
+surveyed bathymetry.
+
+The underwater palette is a small per-fragment world-height tint in the city and
+character materials. It follows the flat water level across partially submerged
+objects, with a 6 cm transition; the HUD, sky and above-water fragments are
+untouched. No camera-wide filter, depth texture or extra render pass is used.

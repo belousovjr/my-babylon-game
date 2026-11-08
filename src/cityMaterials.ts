@@ -6,8 +6,9 @@ import { Color3 } from '@babylonjs/core/Maths/math.color.js';
 import { DitheredTileFadeMaterialPlugin } from '@babylonjs/core/Materials/ditheredTileFadeMaterialPlugin.js';
 import type { Scene } from '@babylonjs/core/scene.js';
 import type { ObjectTemplate } from './world';
+import { WaterPalette } from './waterPalette.ts';
 
-export type CitySurface = 'plain' | 'light' | 'asphalt' | 'concrete' | 'brick' | 'metal' | 'grass' | 'water' | 'paint' | 'facade-stone' | 'facade-brick' | 'facade-glass' | 'facade-dark' | 'roof' | 'rail-steel';
+export type CitySurface = 'plain' | 'light' | 'asphalt' | 'concrete' | 'brick' | 'metal' | 'grass' | 'water' | 'riverbed' | 'paint' | 'facade-stone' | 'facade-brick' | 'facade-glass' | 'facade-dark' | 'roof' | 'rail-steel';
 
 export function buildingSurface(template: ObjectTemplate, accent = false, luminous = false, role?: 'roof' | 'base'): CitySurface {
   if (role) return role === 'roof' ? 'roof' : 'concrete';
@@ -25,6 +26,7 @@ export function buildingSurface(template: ObjectTemplate, accent = false, lumino
 export function streetSurface(color: string): CitySurface {
   if (color === '#454e50') return 'asphalt';
   if (color === '#517d85') return 'water';
+  if (color === '#6a644e') return 'riverbed';
   if (color === '#71896a') return 'grass';
   if (color === '#c3baa1') return 'paint';
   if (['#505b55', '#655044'].includes(color)) return 'rail-steel';
@@ -56,6 +58,7 @@ export class CityMaterials {
     let material = this.materials.get(key);
     if (material) return material;
     material = new StandardMaterial(key, this.scene);
+    new WaterPalette(material);
     material.maxSimultaneousLights = 6;
     material.diffuseColor = Color3.FromHexString(color);
     const glass = surface === 'facade-glass' || surface === 'facade-dark', metal = surface === 'metal', water = surface === 'water';
@@ -63,6 +66,7 @@ export class CityMaterials {
     if (surface === 'plain' || surface === 'light') material.specularColor = Color3.Black();
     material.specularPower = glass ? 96 : water ? 128 : metal ? 48 : 16;
     material.roughness = glass ? 0.22 : water ? 0.16 : metal ? 0.48 : 0.9;
+    if (water) material.backFaceCulling = false;
     if (glass || metal || water) {
       this.environment ??= new CubeTexture(`${this.baseUrl}textures/chicago/environment`, this.scene,
         ['_px.jpg', '_py.jpg', '_pz.jpg', '_nx.jpg', '_ny.jpg', '_nz.jpg']);

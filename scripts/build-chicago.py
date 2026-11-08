@@ -33,6 +33,18 @@ def triangles(poly):
     assert abs(sum(t.area for t in faces.geoms)-poly.area)<max(1e-6,poly.area*1e-9), 'Incomplete surface triangulation'
     return [[[float(x),float(z)] for x,z in list(t.exterior.coords)[:3]] for t in faces.geoms]
 
+def waterbed_geometry(water):
+    step=16
+    xmin,zmin,xmax,zmax=water.bounds
+    result=[]
+    for x in range(math.floor(xmin/step)*step,math.ceil(xmax/step)*step,step):
+        for z in range(math.floor(zmin/step)*step,math.ceil(zmax/step)*step,step):
+            patch=water.intersection(box(x,z,x+step,z+step))
+            if patch.area>1e-8:result.extend(triangles(patch))
+    area=sum(Polygon(t).area for t in result)
+    assert abs(area-water.area)<1e-5, 'Incomplete riverbed'
+    return result
+
 def rings(poly):
     polygons=list(poly.geoms) if hasattr(poly,'geoms') else [poly]
     return [[[float(x),float(z)] for x,z in ring.coords]
@@ -579,6 +591,7 @@ def main():
     signals=traffic_signals(roads,sidewalks,road_union)
     lamps=[lamp for lamp in street_lamps(roads,sidewalks,road_union) if all(math.dist(lamp['position'],signal['position'])>1.5 for signal in signals)]
     env=dict(crosswalks=pedestrian_crossings(signals,roads,sidewalks,road_union),trafficSignals=signals,lamps=lamps,railway=railway,roadSurface=triangles(road_union),sidewalks=triangles(sidewalks),curbs=triangles(curbs),pavingEdges=paving_edges,terraceWalls=terrace_lines,ramps=ramps,origin=[LON,LAT],bounds=list(map(rounded,bounds.bounds)),roads=roads,terrain=terrain,water=triangles(water),riverwalk=triangles(riverwalk),parks=[tri for p in parks for tri in triangles(p.intersection(exposed_ground))],shorelines=rings(water),bridgeDeck=triangles(bridge),bridgeEdges=rings(bridge),bridgeAbutments=rings(abutments),bridgeRails=[[[float(x),float(z)] for x,z in line.coords] for line in rail_lines if line.geom_type=='LineString' and line.length>1])
+    env['waterbed']=waterbed_geometry(water)
     output=dict(world=world,environment=env,report=dict(buildings=len(objects),protectedBuildings=protected_ids,fittedBuildings=fitted_count,omittedBuildings=skipped_count,roads=len(roads),families=dict(families),heights=dict(heights),bounds=BBOX,origin=[LON,LAT],licence='ODbL-1.0',attribution='© OpenStreetMap contributors',waterArea=rounded(water.area)))
     assert len({o['id'] for o in objects})==len(objects), 'Duplicate OSM building IDs'
     (ROOT/'src/generated').mkdir(exist_ok=True)

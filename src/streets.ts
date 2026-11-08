@@ -2,16 +2,18 @@ import { Ray } from '@babylonjs/core/Culling/ray.js';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
 import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData.js';
+import '@babylonjs/core/Meshes/Builders/boxBuilder.js';
 import type { Scene } from '@babylonjs/core/scene.js';
 import type { Material } from '@babylonjs/core/Materials/material.js';
 import { lodDistance } from './lodTransitions.ts';
 import chicago from './generated/chicago.json' with { type: 'json' };
+import { WATER_LEVEL, riverbedElevation } from './water.ts';
 
 // Furniture positions are ground anchors; their template height is applied by the scene.
 export type StreetFurniture = { templateId: 'tree' | 'lamp' | 'traffic_signal'; position: [number, number, number]; yaw: number; headings?: number[] };
 export function elevationAt(_x: number, _z: number, surface: 'street' | 'sidewalk' | 'water' | 'riverwalk' = 'street') {
   // shortcut: flat Loop datum plus stylized river terraces; replace with surveyed terrain when available.
-  return { street: 0, sidewalk: 0.16, water: -5.5, riverwalk: -3.8 }[surface];
+  return { street: 0, sidewalk: 0.16, water: WATER_LEVEL, riverwalk: -3.8 }[surface];
 }
 
 // Visibility never disables the near mesh: its collision geometry remains available.
@@ -64,7 +66,7 @@ export function drawChicagoStreets(scene: Scene, material: (color: string, lod: 
     }
     for (const i of cube.indices!) b.indices.push(offset + i);
   }
-  function surface(triangles: number[][][], y: number, color: string, collision: boolean, downward = false) {
+  function surface(triangles: number[][][], y: number | ((x: number, z: number) => number), color: string, collision: boolean, downward = false) {
     for (const tri of triangles) {
       const x = tri.reduce((s, p) => s + p[0]!, 0) / 3, z = tri.reduce((s, p) => s + p[1]!, 0) / 3;
       const b = batch(x, z, color, collision), offset = b.positions.length / 3;
@@ -72,7 +74,7 @@ export function drawChicagoStreets(scene: Scene, material: (color: string, lod: 
       const [a, c, d] = tri;
       const points = (c![0]! - a![0]!) * (d![1]! - a![1]!) - (c![1]! - a![1]!) * (d![0]! - a![0]!) < 0 ? [a!, d!, c!] : [a!, c!, d!];
       if (downward) points.reverse();
-      for (const p of points) b.positions.push(p[0]!, y, p[1]!);
+      for (const p of points) b.positions.push(p[0]!, typeof y === 'number' ? y : y(p[0]!, p[1]!), p[1]!);
       b.indices.push(offset, offset + 1, offset + 2);
     }
   }
@@ -100,6 +102,7 @@ export function drawChicagoStreets(scene: Scene, material: (color: string, lod: 
   function drawTerrain() {
   for (const cell of data.terrain) surface(cell.triangles, elevationAt(0, 0), '#85877d', true);
   surface(data.water, elevationAt(0, 0, 'water'), '#517d85', false);
+  surface(data.waterbed, riverbedElevation, '#6a644e', true);
   surface(data.riverwalk, elevationAt(0, 0, 'riverwalk'), '#b1a993', true);
   surface(data.parks, 0.015, '#71896a', false);
   }
@@ -205,7 +208,7 @@ export function drawChicagoStreets(scene: Scene, material: (color: string, lod: 
     detailLayer = 'world'; detailLevel = 0;
   }
   drawElevatedRailway();
-  walls(data.shorelines, -5.5, -3.8, '#868b83');
+  walls(data.shorelines, WATER_LEVEL - 8.5, -3.8, '#868b83');
   walls(data.terraceWalls, -3.8, 0, '#868b83');
   surface(data.bridgeDeck, -0.85, '#505b55', true, true);
   walls(data.bridgeEdges, -0.85, 0, '#505b55');

@@ -26,6 +26,7 @@ import { LodTransitions, lodDistance, predictLodEye } from './lodTransitions';
 import { CityMaterials, buildingSurface, streetSurface, facadeVariant } from './cityMaterials';
 import { DayNight } from './dayNight';
 import { Beacons } from './beacons';
+import { WaterPalette } from './waterPalette';
 import './style.css';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
@@ -286,6 +287,9 @@ let animationBlend: AnimationBlend | undefined;
 async function loadCharacter() {
   try {
     const result = await ImportMeshAsync(`${import.meta.env.BASE_URL}models/character.glb`, scene);
+    for (const material of new Set(result.meshes.map(mesh => mesh.material))) {
+      if (material && !material.pluginManager?.getPlugin('WaterPalette')) new WaterPalette(material);
+    }
     const root = result.meshes[0]!;
     for (const a of result.animationGroups) a.stop();
     root.computeWorldMatrix(true);
