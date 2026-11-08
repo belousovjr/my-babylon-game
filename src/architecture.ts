@@ -5,6 +5,7 @@ import type { Material } from '@babylonjs/core/Materials/material.js';
 import type { ObjectTemplate } from './world';
 import facadeLayout from './facadeLayout.json' with { type: 'json' };
 
+import { hasMasonryWindows, windowRows } from './windowMapping.ts';
 import type { Profile } from './profiles.ts';
 export { PROFILES } from './profiles.ts';
 export type { Profile } from './profiles.ts';
@@ -48,8 +49,9 @@ export function attachCollisionGeometry(root: Mesh, source: Mesh): Mesh {
 // Local geometry is normalized to the editable collision box. Materials and geometry are shared by instances.
 export function buildArchitecture(template: ObjectTemplate, scene: Scene, material: Material, detailMaterial: Material, signalHeadings: number[] = [0], surfaceMaterial?: (lod: number, accent: boolean, luminous: boolean, role?: 'roof' | 'base') => Material): Mesh[] {
   const profile = template.profile ?? 'box';
+  const masonry = hasMasonryWindows(template);
   const panelled = ['glass', 'stone', 'deco'].includes(profile);
-  const grid = profile === 'glass' ? facadeLayout.glass : facadeLayout.masonry;
+  const grid = ['glass', 'bundled'].includes(profile) ? facadeLayout.glass : facadeLayout.masonry;
   const { bodyBottom, bodyTop } = facadeLayout;
   const bodyHeight = bodyTop - bodyBottom;
   return Array.from({ length: (template.lodDistances?.length ?? 0) + 1 }, (_, detail) => {
@@ -62,6 +64,9 @@ export function buildArchitecture(template: ObjectTemplate, scene: Scene, materi
       mesh.setVerticesData('color', Array.from({ length: mesh.getTotalVertices() }, () => [shade, shade, shade, 1]).flat());
       const accent = profile === 'marina' ? shade !== 0.75 : shade !== 1;
       mesh.material = surfaceMaterial?.(detail, accent, luminous, role) ?? (shade === 1 ? material : detailMaterial);
+      const bottom = panelled ? Math.max(y - h / 2, bodyBottom) : y - h / 2;
+      const top = panelled ? Math.min(y + h / 2, bodyTop) : y + h / 2;
+      const rows = profile === 'bundled' ? Math.max(1, Math.round(h * grid.rows)) : windowRows(template.size[1], Math.max(0, top - bottom));
       if (surfaceMaterial && profile !== 'tree' && !luminous) {
         const positions = mesh.getVerticesData('position')!, normals = mesh.getVerticesData('normal')!, sourceUVs = mesh.getVerticesData('uv')!, uvs: number[] = [];
         const facade = template.kind === 'building' && !accent && !role;
@@ -70,6 +75,14 @@ export function buildArchitecture(template: ObjectTemplate, scene: Scene, materi
           const nx = Math.abs(normals[i]!), ny = Math.abs(normals[i + 1]!), nz = Math.abs(normals[i + 2]!);
           if (facade && ny > 0.5) uvs.push(0.004 + positions[i]! * 0.004, 0.004 + positions[i + 2]! * 0.004);
           else if (facade) {
+            if (masonry || profile === 'bundled') {
+              const width = nx > nz ? d : w;
+              const columns = Math.max(1, Math.round(width * grid.columns));
+              const local = nx > nz ? positions[i + 2]! : positions[i]!;
+              uvs.push(rows ? (local + 0.5) * columns / grid.columns : 0.002,
+                rows ? (py - bottom) / (top - bottom) * rows / grid.rows : 0.002);
+              continue;
+            }
             const u = round ? sourceUVs[i / 3 * 2]! : (nx > nz ? pz : px) + 0.5;
             const v = profile === 'marina'
               ? (py - facadeLayout.marina.bottom) / (facadeLayout.marina.step * facadeLayout.glass.rows)
@@ -83,22 +96,46 @@ export function buildArchitecture(template: ObjectTemplate, scene: Scene, materi
         mesh.setVerticesData('uv', uvs);
       }
       pieces.push(mesh);
-      if (surfaceMaterial && template.kind === 'building' && !accent && !role && !['glass', 'stone', 'deco'].includes(profile)) {
+      if (surfaceMaterial && masonry && panelled && !accent && !role && detail === 0) {
+        // Details use the same whole-cell mapping as this particular stepped wall.
+        const span = top - bottom;
+        const beltHeight = Math.min(0.008, 1.6 * Math.min(grid.insetTop, grid.insetBottom) / facadeLayout.size * grid.rows * span / Math.max(1, rows));
+        const belts = Math.min(7, rows - 1);
+        for (let i = 1; i <= belts; i++) {
+          const row = Math.round(rows * i / (belts + 1));
+          part(x, bottom + row / rows * span, z, w + 0.005, beltHeight, d + 0.005, 0.87);
+        }
+        for (const axis of ['x', 'z'] as const) {
+          const width = axis === 'x' ? w : d;
+          const columns = Math.max(1, Math.round(width * grid.columns));
+          const ribWidth = Math.min(0.012, 1.6 * grid.insetX / facadeLayout.size * grid.columns * width / columns);
+          const boundaries = new Set([1 / 6, 1 / 2, 5 / 6].map(f => Math.round(columns * f)).filter(c => c > 0 && c < columns));
+          for (const column of boundaries) for (const side of [-1, 1]) {
+            const offset = (column / columns - 0.5) * width;
+            part(x + (axis === 'x' ? offset : side * (w / 2 + 0.002)), (top + bottom) / 2,
+              z + (axis === 'z' ? offset : side * (d / 2 + 0.002)),
+              axis === 'x' ? ribWidth : 0.012, span, axis === 'z' ? ribWidth : 0.012, 1.25);
+          }
+        }
+      }
+      if (surfaceMaterial && template.kind === 'building' && !accent && !role && !['glass', 'stone'].includes(profile)) {
         // Keep a matte roof over every stepped volume without changing its silhouette.
         part(x, y + h / 2 - 0.001, z, w, 0.002, d, 1, round, false, 'roof');
       }
       return mesh;
     };
     if (profile === 'bundled') {
-      const heights = [0.52, 0.72, 0.92, 0.72, 1, 0.92, 0.52, 0.72, 0.52];
+      // Every setback ends on the shared floor grid, so adjacent tubes keep their rows aligned.
+      const heights = [0.52, 0.72, 0.92, 0.72, 1, 0.92, 0.52, 0.72, 0.52]
+        .map(height => Math.round(height * 0.94 * facadeLayout.glass.rows) / facadeLayout.glass.rows);
       part(0, -0.49, 0, 1, 0.02, 1, 1, false, false, 'base');
       heights.forEach((h, i) => {
         const x = (i % 3 - 1) * 0.2;
         const z = (Math.floor(i / 3) - 1) * 0.22;
-        part(x, -0.5 + h * 0.47, z, 0.2, h * 0.94, 0.22);
+        part(x, -0.5 + h / 2, z, 0.2, h, 0.22);
       });
       for (const i of [4, 5]) {
-        const roof = -0.5 + heights[i]! * 0.94;
+        const roof = -0.5 + heights[i]!;
         part((i % 3 - 1) * 0.2, (roof + 0.5) / 2, 0, 0.012, 0.5 - roof, 0.012, 1.4);
       }
     } else if (profile === 'rounded' || profile === 'deco') {
@@ -146,8 +183,8 @@ export function buildArchitecture(template: ObjectTemplate, scene: Scene, materi
     }
     if (panelled) {
       part(0, (-0.5 + bodyBottom) / 2, 0, 1.03, bodyBottom + 0.5, 1.03, 0.72, false, false, 'base');
-      part(0, (bodyTop + 0.5) / 2, 0, 1.02, 0.5 - bodyTop, 1.02, 1.25, false, false, 'roof');
-      if (detail === 0) {
+      if (profile !== 'deco') part(0, (bodyTop + 0.5) / 2, 0, 1.02, 0.5 - bodyTop, 1.02, 1.25, false, false, 'roof');
+      if (detail === 0 && !masonry) {
         // Place structural details on window-cell boundaries and keep them inside the opaque gaps.
         const beltHeight = Math.min(0.008, 1.6 * Math.min(grid.insetTop, grid.insetBottom) / facadeLayout.size * bodyHeight);
         const ribWidth = Math.min(0.012, 1.6 * grid.insetX / facadeLayout.size);

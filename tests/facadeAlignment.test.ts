@@ -26,7 +26,7 @@ test('facade ribs and belts fit opaque texture gaps, including bases and roofs a
     return original(...args);
   });
   try {
-    for (const profile of ['glass', 'stone', 'deco'] as const) {
+    for (const profile of ['glass', 'stone'] as const) {
       captures = [];
       const levels = buildArchitecture({ id: profile, name: profile, profile, kind: 'building', size: [36, 100, 30], color: '#ffffff', lodDistances: [100, 200] }, scene, body, detail, [0],
         (_lod, accent, _light, role) => role === 'base' ? base : role === 'roof' ? roof : accent ? detail : body);
@@ -54,7 +54,7 @@ test('facade ribs and belts fit opaque texture gaps, including bases and roofs a
           }
           checked++;
         }
-        assert.equal(checked, lod === 0 ? 13 : 0);
+        assert.equal(checked, lod === 0 ? (profile === 'glass' ? 13 : 19) : 0);
       }
       levels.forEach(level => level.dispose());
     }
@@ -89,4 +89,93 @@ test('Marina window rows stay aligned with every ring at every LOD', () => {
       (_lod,accent,_light,role)=>role==='roof'?roof:accent?detail:body);
     assert.equal(checked,3);levels.forEach(m=>m.dispose());
   } finally {spy.mock.restore();scene.dispose();engine.dispose();}
+});
+
+test('masonry wall parts contain whole windows of at least 1.5 m, at all LODs and building heights', () => {
+  const engine = new NullEngine(), scene = new Scene(engine);
+  const body = new StandardMaterial('body', scene), detail = new StandardMaterial('detail', scene);
+  const original = Mesh.MergeMeshes;
+  let height = 0, panelled = false, checked = 0;
+  const spy = mock.method(Mesh, 'MergeMeshes', (...args: Parameters<typeof Mesh.MergeMeshes>) => {
+    for (const mesh of args[0].filter(m => m.material === body)) {
+      const positions = mesh.getVerticesData('position')!, uv = mesh.getVerticesData('uv')!, normals = mesh.getVerticesData('normal')!;
+      const bottom = Math.max(mesh.position.y - mesh.scaling.y / 2, panelled ? layout.bodyBottom : -.5);
+      const top = Math.min(mesh.position.y + mesh.scaling.y / 2, panelled ? layout.bodyTop : .5);
+      for (const axis of [0, 2]) {
+        const face = [];
+        for (let i = 0; i < positions.length; i += 3) if (normals[i + axis]! > .9) {
+          face.push({ y: positions[i + 1]! * mesh.scaling.y + mesh.position.y, u: uv[i / 3 * 2]!, v: uv[i / 3 * 2 + 1]! });
+        }
+        const lo = face.reduce((a,b) => a.y < b.y ? a : b), hi = face.reduce((a,b) => a.y > b.y ? a : b);
+        if (hi.v === lo.v) { assert.ok(height * (top - bottom) < 1.5 / .703125 + 1e-5); continue; }
+        const v = (y: number) => lo.v + (y - lo.y) * (hi.v - lo.v) / (hi.y - lo.y);
+        const rows = (v(top) - v(bottom)) * layout.masonry.rows;
+        assert.ok(Math.abs(v(bottom)) < 1e-6);
+        assert.ok(Math.abs(rows - Math.round(rows)) < 1e-5 && rows > 0 && rows <= 16);
+        assert.ok(height * (top - bottom) / rows * .703125 >= 1.5 - 1e-5);
+        const columns = (Math.max(...face.map(p => p.u)) - Math.min(...face.map(p => p.u))) * layout.masonry.columns;
+        assert.ok(Math.abs(columns - Math.round(columns)) < 1e-5 && columns >= 1);
+        // Any horizontal belt crossing this wall must stay in a texture gutter.
+        for (const belt of args[0].filter(m => m.material === detail && m.scaling.y < .02 && Math.abs(m.scaling.x - mesh.scaling.x - .005) < 1e-6)) {
+          if (belt.position.y <= bottom || belt.position.y >= top) continue;
+          const centre = v(belt.position.y) * layout.masonry.rows;
+          assert.ok(Math.abs(centre - Math.round(centre)) < 1e-5);
+        }
+        checked++;
+      }
+    }
+    return original(...args);
+  });
+  try {
+    for (const profile of ['box', 'stone', 'deco', 'clock', 'gothic'] as const) for (height of [1, 8, 20, 36, 100, 200]) {
+      panelled = profile === 'stone' || profile === 'deco';
+      const levels = buildArchitecture({ id: profile, name: profile, profile, kind: 'building', size: [36,height,30], color:'#ffffff', lodDistances:[100,200] }, scene, body, detail, [0],
+        (_lod, accent, _light, role) => accent || role ? detail : body);
+      levels.forEach(m => m.dispose());
+    }
+    assert.ok(checked > 100);
+  } finally { spy.mock.restore(); scene.dispose(); engine.dispose(); }
+});
+
+test('bundled tower maps complete glass windows onto all nine stepped volumes at every LOD', () => {
+  const engine = new NullEngine(), scene = new Scene(engine);
+  const body = new StandardMaterial('windows', scene), detail = new StandardMaterial('structure', scene);
+  const original = Mesh.MergeMeshes;
+  let checked = 0;
+  const spy = mock.method(Mesh, 'MergeMeshes', (...args: Parameters<typeof Mesh.MergeMeshes>) => {
+    const volumes = args[0].filter(mesh => mesh.material === body);
+    assert.equal(volumes.length, 9);
+    for (const mesh of volumes) {
+      assert.ok(Math.abs((mesh.position.y - mesh.scaling.y / 2) + .5) < 1e-6);
+      assert.ok(Math.abs(mesh.scaling.y * layout.glass.rows - Math.round(mesh.scaling.y * layout.glass.rows)) < 1e-6,
+        'every setback ends on the shared floor grid');
+      const uv = mesh.getVerticesData('uv')!, positions = mesh.getVerticesData('position')!, normals = mesh.getVerticesData('normal')!;
+      for (let i = 0; i < positions.length; i += 3) if (Math.abs(normals[i + 1]!) < .1) {
+        const worldY = positions[i + 1]! * mesh.scaling.y + mesh.position.y;
+        assert.ok(Math.abs(uv[i / 3 * 2 + 1]! - (worldY + .5)) < 1e-6,
+          'all tubes use exactly the same vertical texture scale and phase');
+      }
+    }
+    for (const mesh of volumes) for (const axis of [0, 2]) {
+      const uv = mesh.getVerticesData('uv')!, normals = mesh.getVerticesData('normal')!;
+      const us: number[] = [], vs: number[] = [];
+      for (let i = 0; i < normals.length; i += 3) if (Math.abs(normals[i + axis]!) > .9) {
+        us.push(uv[i / 3 * 2]! * layout.glass.columns);
+        vs.push(uv[i / 3 * 2 + 1]! * layout.glass.rows);
+      }
+      for (const values of [us, vs]) {
+        assert.ok(Math.abs(Math.min(...values)) < 1e-6);
+        const end = Math.max(...values);
+        assert.ok(end >= 1 && Math.abs(end - Math.round(end)) < 1e-5, 'wall ends on a full window-cell boundary');
+      }
+      checked++;
+    }
+    return original(...args);
+  });
+  try {
+    const levels = buildArchitecture({id:'willis',name:'Willis',kind:'building',profile:'bundled',size:[70,442,70],color:'#ffffff',lodDistances:[100,200]}, scene, body, detail, [0],
+      (_lod, accent, _light, role) => accent || role ? detail : body);
+    assert.equal(checked, 54);
+    levels.forEach(m => m.dispose());
+  } finally { spy.mock.restore(); scene.dispose(); engine.dispose(); }
 });

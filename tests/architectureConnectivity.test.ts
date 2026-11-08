@@ -54,7 +54,7 @@ test('all architectural details connect through real solid contacts to the base 
   try {
     for(const profile of PROFILES) {
       captures=[];
-      const meshes=buildArchitecture({id:profile,name:profile,kind:'building',size:[1,1,1],color:'#ffffff',profile,lodDistances:[100,200]},scene,material,material);
+      const meshes=buildArchitecture({id:profile,name:profile,kind:'building',size:[36,100,30],color:'#ffffff',profile,lodDistances:[100,200]},scene,material,material,[0],()=>material);
       for(const [lod,parts] of captures.entries()) {
         const connected=new Set(parts.flatMap((p,i)=>p.min.y<=-.5+epsilon&&p.max.y>=-.5-epsilon?[i]:[]));
         let changed=true;

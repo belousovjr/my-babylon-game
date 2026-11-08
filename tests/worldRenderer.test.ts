@@ -42,3 +42,17 @@ test('cell activation and LOD updates keep collision roots independent of visual
   assert.equal(city.updateActiveCell(far,true),false,'editor does not cell-cull the map');
   scene.dispose();engine.dispose();
 });
+
+test('window mapping uses actual object height and refits after editor scaling', () => {
+  const {engine,scene,city}=setup(); city.rebuild(true);
+  const root=city.meshes.get('first')!;
+  const old=city.modelLevels.get(root)![0].sourceMesh;
+  root.scaling.y=8; city.updateCellCoverage(root);
+  const shorter=city.modelLevels.get(root)![0].sourceMesh;
+  assert.notEqual(shorter,old);
+  assert.notEqual(root.metadata.windowMapping,city.meshes.get('second')!.metadata.windowMapping);
+  assert.equal(root.getChildMeshes().filter(m=>m.metadata?.collisionOnly).length,1);
+  root.scaling.y=20; city.updateCellCoverage(root);
+  assert.equal(city.modelLevels.get(root)![0].sourceMesh,old,'restoring height reuses shared geometry');
+  scene.dispose();engine.dispose();
+});

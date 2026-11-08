@@ -1,3 +1,4 @@
+import { windowMappingKey } from './windowMapping.ts';
 import { RENDER_SETTINGS } from './renderSettings.ts';
 import type { Scene } from '@babylonjs/core/scene.js';
 import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
@@ -36,6 +37,12 @@ export class WorldRenderer {
   }
 
   updateCellCoverage(mesh: Mesh) {
+    const template = this.world.templates.find(t => t.id === mesh.metadata.templateId);
+    if (template && mesh.metadata.windowMapping !== windowMappingKey(template, mesh.scaling.y)) {
+      for (const child of mesh.getChildMeshes()) child.dispose();
+      this.lodTransitions.forget(mesh);
+      this.attachModel(mesh, template, mesh.metadata.modelColor, true);
+    }
     mesh.computeWorldMatrix(true);
     for (const child of mesh.getChildMeshes()) if (child.metadata?.collisionOnly) child.computeWorldMatrix(true);
     const bounds = mesh.getBoundingInfo().boundingBox;
@@ -49,10 +56,13 @@ export class WorldRenderer {
     const bodySurface = template.profile === 'stone' && root.scaling.y < 36 ? 'facade-brick' : buildingSurface(template);
     const variant = template.kind === 'building' ? facadeVariant(root.name) : 0;
     const tint = template.profile === 'tree' || color !== this.originalTemplateColors.get(template.id) ? color : '#ffffff';
-    const key = `${template.id}:${color}:${bodySurface}:${variant}:${headings?.join(',') ?? ''}`;
+    const mapping = windowMappingKey(template, root.scaling.y);
+    root.metadata.windowMapping = mapping;
+    root.metadata.modelColor = color;
+    const key = `${mapping}:${template.id}:${color}:${bodySurface}:${variant}:${headings?.join(',') ?? ''}`;
     let sources = this.templateMeshes.get(key);
     if (!sources) {
-      sources = buildArchitecture(template, this.scene, this.materials.get(color, 'plain'), this.materials.get(color, 'plain', 0, 1), headings,
+      sources = buildArchitecture(mapping ? { ...template, size: [template.size[0], root.scaling.y, template.size[2]] } : template, this.scene, this.materials.get(color, 'plain'), this.materials.get(color, 'plain', 0, 1), headings,
         (lod, accent, luminous, role) => this.materials.get(luminous ? '#ffffff' : tint,
           accent || luminous || role ? buildingSurface(template, accent, luminous, role) : bodySurface, lod, accent || luminous || role ? 1 : 0, variant));
       for (const source of sources) source.receiveShadows = true;
