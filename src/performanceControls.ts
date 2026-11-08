@@ -15,19 +15,31 @@ export const PERFORMANCE_OPTIONS = [
   ['beacons', 'Маяки на шпилях'],
 ] as const;
 export type PerformanceFlags = Record<typeof PERFORMANCE_OPTIONS[number][0], boolean>;
+const STORAGE_KEY = 'city-performance';
 export function createPerformanceFlags(): PerformanceFlags {
-  return Object.fromEntries(PERFORMANCE_OPTIONS.map(([key]) => [key, true])) as PerformanceFlags;
+  const flags = Object.fromEntries(PERFORMANCE_OPTIONS.map(([key]) => [key, true])) as PerformanceFlags;
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}');
+    for (const [key] of PERFORMANCE_OPTIONS) if (typeof saved?.[key] === 'boolean') flags[key] = saved[key];
+  } catch { /* Storage may be unavailable or contain invalid JSON. */ }
+  return flags;
 }
 export function bindPerformanceControls(flags: PerformanceFlags, apply: () => void) {
+  const save = () => {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(flags)); } catch { /* Keep controls usable when storage is unavailable. */ }
+    apply();
+  };
   for (const [key] of PERFORMANCE_OPTIONS) {
     const input = document.getElementById(`perf-${key}`) as HTMLInputElement;
-    input.onchange = () => { flags[key] = input.checked; apply(); };
+    input.checked = flags[key];
+    input.onchange = () => { flags[key] = input.checked; save(); };
   }
   document.getElementById('perf-reset')!.onclick = () => {
     for (const [key] of PERFORMANCE_OPTIONS) {
       flags[key] = true;
       (document.getElementById(`perf-${key}`) as HTMLInputElement).checked = true;
     }
-    apply();
+    save();
   };
+  apply();
 }

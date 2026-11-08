@@ -1,5 +1,6 @@
 import { buildTree } from './treeGeometry.ts';
 import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData.js';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
 import type { Scene } from '@babylonjs/core/scene.js';
 import type { Material } from '@babylonjs/core/Materials/material.js';
@@ -48,6 +49,42 @@ export function attachCollisionGeometry(root: Mesh, source: Mesh): Mesh {
   return collider;
 }
 
+// Keep only the exposed rim of a slab; its middle is buried inside the facade.
+function hollowSlab(mesh: Mesh, innerX: number, innerZ: number) {
+  const source = VertexData.ExtractFromMesh(mesh);
+  const positions: number[] = [], normals: number[] = [], uvs: number[] = [], indices: number[] = [];
+  const remap = new Map<number, number>();
+  for (let i = 0; i < source.indices!.length; i += 3) {
+    const triangle = Array.from(source.indices!.slice(i, i + 3));
+    if (triangle.every(index => Math.abs(source.normals![index * 3 + 1]!) > .5)) continue;
+    for (const index of triangle) {
+      if (!remap.has(index)) {
+        remap.set(index, positions.length / 3);
+        positions.push(...source.positions!.slice(index * 3, index * 3 + 3));
+        normals.push(...source.normals!.slice(index * 3, index * 3 + 3));
+        uvs.push(...source.uvs!.slice(index * 2, index * 2 + 2));
+      }
+      indices.push(remap.get(index)!);
+    }
+  }
+  const perimeter = new Map<string, [number, number]>();
+  for (let i = 0; i < source.positions!.length; i += 3) {
+    const x = source.positions![i]!, z = source.positions![i + 2]!;
+    if (source.normals![i + 1]! > .5 && Math.hypot(x, z) > .1) perimeter.set(`${x.toFixed(6)}:${z.toFixed(6)}`, [x, z]);
+  }
+  const outline = [...perimeter.values()].sort((a, b) => Math.atan2(a[1], a[0]) - Math.atan2(b[1], b[0]));
+  for (const y of [-.5, .5]) for (let i = 0; i < outline.length; i++) {
+    const a = outline[i]!, b = outline[(i + 1) % outline.length]!, start = positions.length / 3;
+    for (const [x, z] of [a, b, [b[0] * innerX, b[1] * innerZ], [a[0] * innerX, a[1] * innerZ]]) {
+      positions.push(x!, y, z!); normals.push(0, Math.sign(y), 0); uvs.push(x! + .5, z! + .5);
+    }
+    indices.push(...(y > 0 ? [0, 1, 2, 0, 2, 3] : [0, 2, 1, 0, 3, 2]).map(index => start + index));
+  }
+  const data = new VertexData();
+  data.positions = positions; data.normals = normals; data.uvs = uvs; data.indices = indices;
+  data.applyToMesh(mesh);
+}
+
 // Local geometry is normalized to the editable collision box. Materials and geometry are shared by instances.
 export function buildArchitecture(template: ObjectTemplate, scene: Scene, material: Material, detailMaterial: Material, signalHeadings: number[] = [0], surfaceMaterial?: (lod: number, accent: boolean, luminous: boolean, role?: 'roof' | 'base') => Material, treeVariant = 0, leafMaterial?: Material, farLeafMaterial?: Material): Mesh[] {
   const profile = template.profile ?? 'box';
@@ -59,10 +96,11 @@ export function buildArchitecture(template: ObjectTemplate, scene: Scene, materi
   const bodyHeight = bodyTop - bodyBottom;
   return Array.from({ length: (template.lodDistances?.length ?? 0) + 1 }, (_, detail) => {
     const pieces: Mesh[] = [];
-    const part = (x: number, y: number, z: number, w: number, h: number, d: number, shade = 1, round: boolean | 'sphere' = false, luminous = false, role?: 'roof' | 'base') => {
+    const part = (x: number, y: number, z: number, w: number, h: number, d: number, shade = 1, round: boolean | 'sphere' = false, luminous = false, role?: 'roof' | 'base', inner?: [number, number]) => {
       const mesh = round === 'sphere' ? MeshBuilder.CreateSphere('part', { diameter: 1, segments: 4 }, scene) : round
         ? MeshBuilder.CreateCylinder('part', { diameter: 1, height: 1, tessellation: detail === 0 ? 12 : profile === 'marina' && detail >= 2 ? 6 : 8 }, scene)
         : MeshBuilder.CreateBox('part', { size: 1 }, scene);
+      if (inner) hollowSlab(mesh, inner[0] / w, inner[1] / d);
       mesh.scaling.set(w, h, d); mesh.position.set(x, y, z);
       mesh.setVerticesData('color', Array.from({ length: mesh.getTotalVertices() }, () => [shade, shade, shade, 1]).flat());
       const accent = profile === 'marina' ? shade !== 0.75 : shade !== 1;
@@ -119,7 +157,7 @@ export function buildArchitecture(template: ObjectTemplate, scene: Scene, materi
         const belts = Math.min(7, rows - 1);
         for (let i = 1; i <= belts; i++) {
           const row = Math.round(rows * i / (belts + 1));
-          part(x, bottom + row / rows * span, z, w + 0.005, beltHeight, d + 0.005, 0.87);
+          part(x, bottom + row / rows * span, z, w + 0.005, beltHeight, d + 0.005, 0.87, false, false, undefined, [w, d]);
         }
         for (const axis of ['x', 'z'] as const) {
           const width = axis === 'x' ? w : d;
@@ -166,7 +204,7 @@ export function buildArchitecture(template: ObjectTemplate, scene: Scene, materi
       const top = bottom + rings * step;
       part(0, (bottom + top) / 2, 0, 0.78, top - bottom, 0.78, 0.75, true);
       part(0, (-0.5 + bottom) / 2, 0, 0.8, bottom + 0.5, 0.8, 1.15, true, false, 'base');
-      for (let i = 0; i < rings; i++) part(0, bottom + i * step, 0, 1, 0.015, 1, 1.15, true);
+      for (let i = 0; i < rings; i++) part(0, bottom + i * step, 0, 1, 0.015, 1, 1.15, true, false, undefined, [0.78, 0.78]);
       part(0, (top + 0.5) / 2, 0, 0.8, 0.5 - top, 0.8, 1, true);
     } else if (profile === 'clock' || profile === 'gothic') {
       part(0, -0.21, 0, 1, 0.58, 1);
@@ -204,7 +242,7 @@ export function buildArchitecture(template: ObjectTemplate, scene: Scene, materi
         const ribWidth = Math.min(0.012, 1.6 * grid.insetX / facadeLayout.size);
         for (let i = 1; i < 8; i++) {
           const row = Math.round(grid.rows * i / 8);
-          part(0, bodyBottom + row / grid.rows * bodyHeight, 0, 1.005, beltHeight, 1.005, profile === 'glass' ? 0.7 : 0.87);
+          part(0, bodyBottom + row / grid.rows * bodyHeight, 0, 1.005, beltHeight, 1.005, profile === 'glass' ? 0.7 : 0.87, false, false, undefined, [1, 1]);
         }
         for (const fraction of [1 / 6, 1 / 2, 5 / 6]) {
           const x = Math.round(grid.columns * fraction) / grid.columns - 0.5;

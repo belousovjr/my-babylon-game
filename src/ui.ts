@@ -12,7 +12,7 @@ app.innerHTML = `
     <label for="day-time">Время суток <output id="day-time-label" for="day-time">14:00</output></label>
     <input id="day-time" type="range" min="0" max="23.95" step="0.05" value="14" aria-label="Время суток">
     <details id="performance-panel"><summary>Производительность · тесты</summary>
-      <p class="muted">Флажки действуют и в игре. В карту не сохраняются. Выключенный LOD фиксирует текущую детализацию.</p>
+      <p class="muted">Флажки действуют и в игре. Сохраняются в этом браузере. Выключенный LOD фиксирует текущую детализацию.</p>
       ${PERFORMANCE_OPTIONS.map(([key, label]) => `<label class="check"><input id="perf-${key}" type="checkbox" checked> ${label}</label>`).join('')}
       <button id="perf-reset" type="button">Включить всё</button>
     </details>
