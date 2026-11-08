@@ -3,6 +3,7 @@ import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
 import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight.js';
 import { DirectionalLight } from '@babylonjs/core/Lights/directionalLight.js';
 import { SpotLight } from '@babylonjs/core/Lights/spotLight.js';
+import { CascadedShadowGenerator } from '@babylonjs/core/Lights/Shadows/cascadedShadowGenerator.js';
 import { ShadowGenerator } from '@babylonjs/core/Lights/Shadows/shadowGenerator.js';
 import { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial.js';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
@@ -75,13 +76,22 @@ export class DayNight {
     scene.fogEnd = 650 / 0.6;
     this.skyLight = new HemisphericLight('sky-ambient', Vector3.Up(), scene);
     this.sun = new DirectionalLight('sun-moon', new Vector3(0, -1, 0), scene);
-    this.sun.shadowFrustumSize = 240; this.sun.shadowMinZ = 1; this.sun.shadowMaxZ = 1600;
-    this.shadows = new ShadowGenerator(1024, this.sun);
+    this.sun.shadowFrustumSize = 600; this.sun.shadowMinZ = 1; this.sun.shadowMaxZ = 1600;
+    this.shadows = CascadedShadowGenerator.IsSupported ? new CascadedShadowGenerator(1024, this.sun) : new ShadowGenerator(1024, this.sun);
+    if (this.shadows instanceof CascadedShadowGenerator) {
+      this.shadows.numCascades = 2;
+      this.shadows.shadowMaxZ = 400;
+      this.shadows.lambda = .65;
+      this.shadows.cascadeBlendPercentage = .2;
+      this.shadows.stabilizeCascades = true;
+      this.shadows.depthClamp = true;
+    }
+    this.shadows.frustumEdgeFalloff = .2;
     this.shadows.usePercentageCloserFiltering = true;
-    this.shadows.filteringQuality = ShadowGenerator.QUALITY_LOW;
+    this.shadows.filteringQuality = ShadowGenerator.QUALITY_MEDIUM;
     this.shadows.bias = 0.0005; this.shadows.normalBias = 0.12;
     this.shadows.setDarkness(0.22);
-    this.shadows.getShadowMap()!.refreshRate = 2;
+    this.shadows.getShadowMap()!.refreshRate = this.shadows instanceof CascadedShadowGenerator ? 1 : 2;
     this.sky = new ShaderMaterial('day-night-sky', scene, { vertexSource, fragmentSource }, {
       attributes: ['position'], uniforms: ['worldViewProjection', 'sunDirection', 'hazeColor', 'day', 'sunset', 'wind'],
     });
@@ -122,8 +132,8 @@ export class DayNight {
     this.lamps = lamps.map(root => ({ position: Vector3.TransformCoordinates(new Vector3(0.45, 0.4, 0), root.computeWorldMatrix(true)) }));
     // Hardware instances share their source light list; ground pools use a shared lightmap, live spotlights affect moving actors.
     this.receivers = receivers.filter(mesh => !mesh.isAnInstance && !mesh.metadata?.procedural && mesh.getTotalVertices() > 0);
-    for (const mesh of this.receivers) mesh.receiveShadows = true;
-    this.casters = receivers.filter(mesh => (!mesh.metadata?.procedural || mesh.metadata.shadowCaster) && mesh.getTotalVertices() > 0);
+    for (const mesh of receivers) mesh.receiveShadows = true;
+    this.casters = receivers.filter(mesh => mesh.metadata?.shadowCaster !== false && mesh.metadata?.detailLayer !== 'rail-structure' && (!mesh.metadata?.procedural || mesh.metadata.shadowCaster) && mesh.getTotalVertices() > 0);
     this.elapsed = 1;
   }
 
@@ -153,11 +163,18 @@ export class DayNight {
       light.intensity = intensity;
     });
     if (this.sun.shadowEnabled) {
-      const near = this.casters.filter(mesh => !mesh.isDisposed() && mesh.isEnabled() && mesh.isVisible).map(mesh => {
-        mesh.computeWorldMatrix(true); const b = mesh.getBoundingInfo().boundingBox;
-        return { mesh, distance: Vector3.DistanceSquared(eye, Vector3.Clamp(eye, b.minimumWorld, b.maximumWorld)) };
-      }).filter(item => item.distance < 120 ** 2).sort((a, b) => a.distance - b.distance).slice(0, 96);
-      this.shadows.getShadowMap()!.renderList = near.map(item => item.mesh);
+      // Caster selection must not pop at a distance or when a nearer building takes a budget slot.
+      this.shadows.getShadowMap()!.renderList = this.casters.filter(mesh => {
+        if (mesh.isDisposed() || !mesh.isEnabled() || !mesh.isVisible) return false;
+        mesh.computeWorldMatrix(true);
+        const { minimumWorld: min, maximumWorld: max } = mesh.getBoundingInfo().boundingBox;
+        // Include the projected shadow, not just the building; the extra 100 m stays outside cascade coverage.
+        const travel = Math.max(0, max.y - Math.min(0, eye.y)) / Math.max(.06, -this.sun.direction.y);
+        const sx = this.sun.direction.x * travel, sz = this.sun.direction.z * travel;
+        const dx = Math.max(min.x + Math.min(0, sx) - eye.x, 0, eye.x - max.x - Math.max(0, sx));
+        const dz = Math.max(min.z + Math.min(0, sz) - eye.z, 0, eye.z - max.z - Math.max(0, sz));
+        return dx * dx + dz * dz < 500 ** 2;
+      });
     } else this.shadows.getShadowMap()!.renderList = [];
   }
 }

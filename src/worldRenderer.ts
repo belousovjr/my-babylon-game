@@ -75,7 +75,7 @@ export class WorldRenderer {
     const levels = sources.map((source, i) => {
       const instance = source.createInstance(`${root.name}-lod${i}`);
       instance.parent = root; instance.isPickable = pickable;
-      instance.metadata = { worldId: root.name }; instance.isVisible = i === sources.length - 1;
+      instance.metadata = { worldId: root.name, shadowCaster: template.kind === 'building' }; instance.isVisible = i === sources.length - 1;
       return instance;
     });
     attachCollisionGeometry(root, sources[0]!);
