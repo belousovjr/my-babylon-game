@@ -1,3 +1,7 @@
+import '@babylonjs/core/Collisions/collisionCoordinator.js';
+import { NearbyMeshes } from '../src/nearbyMeshes.ts';
+import { updateStreetDetailLODs } from '../src/streets.ts';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { NullEngine } from '@babylonjs/core/Engines/nullEngine.js';
@@ -93,4 +97,43 @@ test('riverbed renders only below water while surface becomes translucent', () =
   meshes[0].dispose();
   assert.equal(scene.onBeforeCameraRenderObservable.hasObservers(), false);
   scene.dispose(); engine.dispose();
+});
+
+
+test('bank walls block the player along the entire river, including beside bridges', () => {
+  const engine = new NullEngine(), scene = new Scene(engine);
+  scene.collisionsEnabled = true;
+  const material = new StandardMaterial('bank-test', scene);
+  const meshes = drawChicagoStreets(scene, () => material).meshes;
+  const body = new Mesh('player-probe',scene);
+  body.ellipsoid.set(.35,.9,.35); body.ellipsoidOffset.set(0,.9,0);
+  const nearby = new NearbyMeshes();
+  nearby.setSources(meshes.filter(mesh => mesh.checkCollisions));
+  updateStreetDetailLODs(meshes, Vector3.Zero());
+  assert.ok(meshes.filter(mesh=>mesh.name.includes('#868b83') && mesh.metadata.detailLayer==='world').every(mesh=>mesh.isVisible && mesh.checkCollisions));
+  let checked=0;
+  for (const [rings,y] of [[chicago.environment.shorelines,-6], [chicago.environment.terraceWalls,-3.7], [chicago.environment.terraceWalls,null], [chicago.environment.shorelines,null], [chicago.environment.bridgeAbutments,null]]) {
+    for (const ring of rings) for(let i=1;i<ring.length;i++) {
+      const a=ring[i-1],b=ring[i],dx=b[0]-a[0],dz=b[1]-a[1],length=Math.hypot(dx,dz);
+      if(length<2)continue;
+      for (const t of [.01, .5, .99]) {
+      const x=a[0]+dx*t,z=a[1]+dz*t;
+      const footY = y ?? riverbedElevation(x,z) + .05;
+      for(const side of [-1,1]) {
+        const nx=-dz/length*side,nz=dx/length*side;
+        body.position.set(x+nx,footY,z+nz);body.computeWorldMatrix(true);
+        const steps = t === .5 ? 20 : 1;
+        for (let step=0;step<steps;step++) {
+          body.surroundingMeshes = nearby.get(body.position,12);
+          body.computeWorldMatrix(true);
+          body.moveWithCollisions(new Vector3(-nx*2/steps,0,-nz*2/steps));
+        }
+        assert.ok(t === .5 ? (body.position.x-x)*nx+(body.position.z-z)*nz>.25 : Math.hypot(body.position.x-x-nx,body.position.z-z-nz)<1.95, 'crossed bank at '+[x,footY,z,side,t]);
+        checked++;
+      }
+      }
+    }
+  }
+  assert.ok(checked>0);
+  scene.dispose();engine.dispose();
 });

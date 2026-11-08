@@ -84,16 +84,24 @@ export function drawChicagoStreets(scene: Scene, material: (color: string, lod: 
       [x + a! * width / 2 * cos + b! * depth / 2 * sin, z - a! * width / 2 * sin + b! * depth / 2 * cos]);
     surface([[p[0]!, p[1]!, p[2]!], [p[0]!, p[2]!, p[3]!]], 0.055, '#c3baa1', false);
   }
-  function walls(lines: number[][][], bottom: number, top: number, color: string) {
+  function walls(lines: number[][][], bottom: number | ((x: number, z: number) => number), top: number, color: string) {
+    if (typeof bottom === 'function') lines = lines.map(line => line.flatMap((a, i) => {
+      const c = line[i + 1];
+      if (!c) return [a];
+      const count = Math.ceil(Math.hypot(c[0]! - a[0]!, c[1]! - a[1]!) / 2);
+      return Array.from({ length: count }, (_, j) => [a[0]! + (c[0]! - a[0]!) * j / count, a[1]! + (c[1]! - a[1]!) * j / count]);
+    }));
     for (const line of lines) for (let i = 1; i < line.length; i++) {
       const a = line[i - 1]!, c = line[i]!;
-      const b = batch((a[0]! + c[0]!) / 2, (a[1]! + c[1]!) / 2, color, true);
-      // Independent vertices keep normals valid on both sides of the continuous wall.
-      for (const reverse of [false, true]) {
-        const offset = b.positions.length / 3;
-        b.positions.push(a[0]!, bottom, a[1]!, c[0]!, bottom, c[1]!, a[0]!, top, a[1]!, c[0]!, top, c[1]!);
-        b.indices.push(...(reverse ? [0, 2, 1, 1, 2, 3] : [0, 1, 2, 1, 3, 2]).map(n => n + offset));
-      }
+      const bottomA = typeof bottom === 'number' ? bottom : bottom(a[0]!, a[1]!);
+      const bottomC = typeof bottom === 'number' ? bottom : bottom(c[0]!, c[1]!);
+      const dx = c[0]! - a[0]!, dz = c[1]! - a[1]!, length = Math.hypot(dx, dz);
+      if (length < .001) continue;
+      // The visible wall is a closed solid, not coincident one-sided collision planes.
+      const base = Math.min(bottomA, bottomC);
+      box((a[0]! + c[0]!) / 2, (base + top) / 2, (a[1]! + c[1]!) / 2,
+        length + .12, top - base, .12, -Math.atan2(dz, dx), color);
+
     }
   }
   const data = chicago.environment;
@@ -208,11 +216,11 @@ export function drawChicagoStreets(scene: Scene, material: (color: string, lod: 
     detailLayer = 'world'; detailLevel = 0;
   }
   drawElevatedRailway();
-  walls(data.shorelines, WATER_LEVEL - 3.1, -3.8, '#868b83');
-  walls(data.terraceWalls, -3.8, 0, '#868b83');
+  walls(data.shorelines, (x, z) => riverbedElevation(x, z) - 1, -3.8, '#868b83');
+  walls(data.terraceWalls, (x, z) => riverbedElevation(x, z) - 1, 0, '#868b83');
   surface(data.bridgeDeck, -0.85, '#505b55', true, true);
   walls(data.bridgeEdges, -0.85, 0, '#505b55');
-  walls(data.bridgeAbutments, -5.8, -0.85, '#868b83');
+  walls(data.bridgeAbutments, (x, z) => Math.min(-5.8, riverbedElevation(x, z) - 1), -0.85, '#868b83');
   for (const line of data.bridgeRails) for (let i = 1; i < line.length; i++) {
     const a = line[i - 1]!, b = line[i]!, dx = b[0]! - a[0]!, dz = b[1]! - a[1]!;
     box((a[0]! + b[0]!) / 2, 0.66, (a[1]! + b[1]!) / 2, Math.hypot(dx, dz), 1, 0.18, -Math.atan2(dz, dx), '#868b83');
