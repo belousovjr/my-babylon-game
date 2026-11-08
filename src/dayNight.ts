@@ -8,7 +8,7 @@ import { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial.js';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
 import type { AbstractMesh } from '@babylonjs/core/Meshes/abstractMesh.js';
 import type { Mesh } from '@babylonjs/core/Meshes/mesh.js';
-import type { Scene } from '@babylonjs/core/scene.js';
+import { Scene } from '@babylonjs/core/scene.js';
 
 const smooth = (a: number, b: number, value: number) => { const t = Math.max(0, Math.min(1, (value - a) / (b - a))); return t * t * (3 - 2 * t); };
 export function daylightAt(hour: number) {
@@ -29,12 +29,11 @@ const vertexSource = `precision highp float;
 attribute vec3 position; uniform mat4 worldViewProjection; varying vec3 ray;
 void main(){ ray=position; gl_Position=worldViewProjection*vec4(position,1.0); gl_Position.z=gl_Position.w; }`;
 const fragmentSource = `precision highp float;
-varying vec3 ray; uniform vec3 sunDirection; uniform float day; uniform float sunset; uniform float wind;
+varying vec3 ray; uniform vec3 sunDirection; uniform vec3 hazeColor; uniform float day; uniform float sunset; uniform float wind;
 float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 void main(){
  vec3 d=normalize(ray); float height=smoothstep(-0.06,0.8,d.y);
- vec3 horizon=mix(vec3(0.045,0.065,0.12),vec3(0.67,0.8,0.9),day);
- horizon=mix(horizon,vec3(0.94,0.43,0.24),sunset*0.65);
+ vec3 horizon=hazeColor;
  vec3 zenith=mix(vec3(0.005,0.012,0.04),vec3(0.12,0.36,0.69),day);
  vec3 color=mix(horizon,zenith,height);
  vec2 starUV=d.xz/max(0.22,d.y+0.3); vec2 p=starUV+vec2(wind,wind*0.25);
@@ -70,6 +69,10 @@ export class DayNight {
 
   constructor(scene: Scene) {
     this.scene = scene;
+    scene.fogMode = Scene.FOGMODE_LINEAR;
+    scene.fogStart = 0;
+    // 30% haze at the city's typical far-LOD distance; rebuild recalibrates from its templates.
+    scene.fogEnd = 650 / 0.3;
     this.skyLight = new HemisphericLight('sky-ambient', Vector3.Up(), scene);
     this.sun = new DirectionalLight('sun-moon', new Vector3(0, -1, 0), scene);
     this.sun.shadowFrustumSize = 240; this.sun.shadowMinZ = 1; this.sun.shadowMaxZ = 1600;
@@ -80,7 +83,7 @@ export class DayNight {
     this.shadows.setDarkness(0.22);
     this.shadows.getShadowMap()!.refreshRate = 2;
     this.sky = new ShaderMaterial('day-night-sky', scene, { vertexSource, fragmentSource }, {
-      attributes: ['position'], uniforms: ['worldViewProjection', 'sunDirection', 'day', 'sunset', 'wind'],
+      attributes: ['position'], uniforms: ['worldViewProjection', 'sunDirection', 'hazeColor', 'day', 'sunset', 'wind'],
     });
     this.sky.backFaceCulling = false; this.sky.disableDepthWrite = true;
     this.skyMesh = MeshBuilder.CreateSphere('sky-dome', { diameter: 2800, segments: 16 }, scene);
@@ -109,8 +112,9 @@ export class DayNight {
     this.sun.specular.copyFrom(this.sun.diffuse);
     this.sun.shadowEnabled = sun.y > 0.06;
     this.scene.ambientColor = Color3.Lerp(new Color3(0.035, 0.026, 0.022), new Color3(0.015, 0.02, 0.025), day);
-    this.scene.fogColor = Color3.Lerp(new Color3(0.045, 0.065, 0.12), new Color3(0.67, 0.8, 0.9), day);
-    this.scene.fogColor = Color3.Lerp(this.scene.fogColor, new Color3(0.82, 0.43, 0.3), sunset * 0.5);
+    this.scene.fogColor = Color3.Lerp(new Color3(0.09, 0.12, 0.18), new Color3(0.73, 0.70, 0.65), day);
+    this.scene.fogColor = Color3.Lerp(this.scene.fogColor, new Color3(0.90, 0.57, 0.30), sunset);
+    this.sky.setColor3('hazeColor', this.scene.fogColor);
     this.elapsed = 1;
   }
 

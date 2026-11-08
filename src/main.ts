@@ -5,7 +5,7 @@ import { UniversalCamera } from '@babylonjs/core/Cameras/universalCamera.js';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
 import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode.js';
-import { Color3, Color4 } from '@babylonjs/core/Maths/math.color.js';
+import { Color4 } from '@babylonjs/core/Maths/math.color.js';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
 import { GizmoManager } from '@babylonjs/core/Gizmos/gizmoManager.js';
 import { ImportMeshAsync } from '@babylonjs/core/Loading/sceneLoader.js';
@@ -75,9 +75,6 @@ const engine = new Engine(canvas, true, { stencil: true });
 engine.setHardwareScalingLevel(Math.max(1, window.devicePixelRatio / 1.5));
 const scene = new Scene(engine);
 scene.clearColor = Color4.FromHexString('#bacbccff');
-scene.fogMode = Scene.FOGMODE_LINEAR;
-scene.fogColor = Color3.FromHexString('#bacbcc');
-scene.fogStart = 1500; scene.fogEnd = 4000;
 scene.collisionsEnabled = true;
 const lighting = new DayNight(scene);
 const camera = new ArcRotateCamera('follow', -Math.PI / 2, 1.22, 9, new Vector3(32, 1, 22), scene);
@@ -233,6 +230,9 @@ function updateLODs() {
 }
 
 function rebuild() {
+  const farLods = world.templates.filter(t => t.kind === 'building' && t.lodDistances?.length)
+    .map(t => t.lodDistances!.at(-1)!).sort((a, b) => a - b);
+  scene.fogEnd = (farLods[Math.floor(farLods.length / 2)] ?? 650) / 0.3;
   initialLods = true;
   lodTransitions.clear();
   activeCell = '';

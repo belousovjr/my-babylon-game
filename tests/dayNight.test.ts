@@ -16,6 +16,24 @@ test('daylight wraps smoothly through midnight, dawn and dusk', () => {
   assert.throws(() => daylightAt(NaN), RangeError);
 });
 
+test('haze grows linearly through far LOD and smoothly changes its palette with the sky', () => {
+  const engine = new NullEngine(), scene = new Scene(engine), lighting = new DayNight(scene);
+  assert.equal(scene.fogMode, Scene.FOGMODE_LINEAR);
+  assert.equal(scene.fogStart, 0);
+  const opacity = distance => (distance - scene.fogStart) / (scene.fogEnd - scene.fogStart);
+  assert.ok(Math.abs(opacity(650) - .3) < 1e-8);
+  assert.ok(Math.abs(opacity(1300) - .6) < 1e-8);
+  lighting.setTime(12); const day = scene.fogColor.clone();
+  lighting.setTime(6); const dawn = scene.fogColor.clone();
+  lighting.setTime(18); assert.ok(scene.fogColor.equalsWithEpsilon(dawn, 1e-6));
+  lighting.setTime(0); const night = scene.fogColor.clone();
+  assert.ok(day.r > day.b && day.g > day.b, 'daytime smog is grey-beige');
+  assert.ok(dawn.r > dawn.g && dawn.g > dawn.b && dawn.r > day.r, 'dawn and dusk are warm');
+  assert.ok(night.b > night.g && night.g > night.r && night.b < day.b, 'night haze is dark blue-grey');
+  lighting.setTime(23.9999); assert.ok(scene.fogColor.equalsWithEpsilon(night, 1e-6));
+  scene.dispose(); engine.dispose();
+});
+
 test('lighting uses a fixed light budget, local receivers, and bounded dynamic shadows', () => {
   const engine = new NullEngine(), scene = new Scene(engine), lighting = new DayNight(scene);
   const road = MeshBuilder.CreateBox('road', { width: 40, depth: 40 }, scene);
