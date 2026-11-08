@@ -71,7 +71,10 @@ export function buildArchitecture(template: ObjectTemplate, scene: Scene, materi
           if (facade && ny > 0.5) uvs.push(0.004 + positions[i]! * 0.004, 0.004 + positions[i + 2]! * 0.004);
           else if (facade) {
             const u = round ? sourceUVs[i / 3 * 2]! : (nx > nz ? pz : px) + 0.5;
-            uvs.push(u, panelled ? (py - bodyBottom) / bodyHeight : py + 0.5);
+            const v = profile === 'marina'
+              ? (py - facadeLayout.marina.bottom) / (facadeLayout.marina.step * facadeLayout.glass.rows)
+              : panelled ? (py - bodyBottom) / bodyHeight : py + 0.5;
+            uvs.push(u, v);
           } else {
             uvs.push((ny > 0.5 || nz >= nx ? px * template.size[0] : pz * template.size[2]) / 4,
               (ny > 0.5 ? pz * template.size[2] : py * template.size[1]) / 4);
@@ -107,8 +110,8 @@ export function buildArchitecture(template: ObjectTemplate, scene: Scene, materi
       part(0.08, 0.47, 0, 0.015, 0.06, 0.015, 1.3);
     } else if (profile === 'marina') {
       part(0, -0.03, 0, 0.78, 0.94, 0.78, 0.75, true);
-      const rings = 18;
-      for (let i = 0; i < rings; i++) part(0, -0.46 + i * 0.9 / rings, 0, 1, 0.015, 1, 1.15, true);
+      const { rings, bottom, step } = facadeLayout.marina;
+      for (let i = 0; i < rings; i++) part(0, bottom + i * step, 0, 1, 0.015, 1, 1.15, true);
       part(0, 0.46, 0, 0.8, 0.08, 0.8, 1, true);
     } else if (profile === 'clock' || profile === 'gothic') {
       part(0, -0.21, 0, 1, 0.58, 1);

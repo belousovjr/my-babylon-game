@@ -60,3 +60,33 @@ test('facade ribs and belts fit opaque texture gaps, including bases and roofs a
     }
   } finally { spy.mock.restore(); scene.dispose(); engine.dispose(); }
 });
+
+test('Marina window rows stay aligned with every ring at every LOD', () => {
+  const engine=new NullEngine(),scene=new Scene(engine);
+  const body=new StandardMaterial('windows',scene),detail=new StandardMaterial('rings',scene),roof=new StandardMaterial('roof',scene);
+  const original=Mesh.MergeMeshes;
+  let checked=0;
+  const spy=mock.method(Mesh,'MergeMeshes',(...args:Parameters<typeof Mesh.MergeMeshes>)=>{
+    const parts=args[0],core=parts.find(p=>p.material===body)!;
+    const positions=core.getVerticesData('position')!,uv=core.getVerticesData('uv')!,normals=core.getVerticesData('normal')!;
+    const side=[];
+    for(let i=0;i<positions.length;i+=3) if(Math.abs(normals[i+1]!)<.1) {
+      side.push({y:positions[i+1]!*core.scaling.y+core.position.y,v:uv[i/3*2+1]!});
+    }
+    const lo=side.reduce((a,b)=>a.y<b.y?a:b),hi=side.reduce((a,b)=>a.y>b.y?a:b);
+    const rowAt=(y:number)=>(lo.v+(y-lo.y)*(hi.v-lo.v)/(hi.y-lo.y))*layout.glass.rows;
+    const rings=parts.filter(p=>p.material===detail && Math.abs(p.scaling.y-.015)<1e-6);
+    assert.equal(rings.length,layout.marina.rings);
+    for(const [i,ring] of rings.entries()) {
+      assert.ok(Math.abs(rowAt(ring.position.y)-i)<1e-5,'ring centre falls on a window-row boundary');
+      assert.ok(Math.abs(rowAt(ring.position.y+.0075)-(i+.15))<1e-5,'visible gaps retain the same window phase');
+    }
+    checked++;
+    return original(...args);
+  });
+  try {
+    const levels=buildArchitecture({id:'marina',name:'Marina',profile:'marina',kind:'building',size:[38,179,38],color:'#ffffff',lodDistances:[180,650]},scene,body,detail,[0],
+      (_lod,accent,_light,role)=>role==='roof'?roof:accent?detail:body);
+    assert.equal(checked,3);levels.forEach(m=>m.dispose());
+  } finally {spy.mock.restore();scene.dispose();engine.dispose();}
+});
