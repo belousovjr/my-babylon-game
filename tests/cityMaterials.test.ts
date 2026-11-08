@@ -116,3 +116,13 @@ test('grass overlays terrain with a stable depth bias at every detail level', ()
   assert.equal(materials.get('#ffffff', 'grass', 0, 3, 0, true).zOffset, -3);
   scene.dispose(); engine.dispose();
 });
+
+test('roof materials always win depth conflicts against facade and accent materials',()=>{
+  const engine=new NullEngine(),scene=new Scene(engine),materials=new CityMaterials(scene,'/');
+  for(const lod of [0,1,2]) {
+    const roof=materials.get('#ffffff','roof',lod,1),facade=materials.get('#ffffff','facade-glass',lod),accent=materials.get('#ffffff','concrete',lod,1);
+    assert.ok(roof.zOffset<facade.zOffset && roof.zOffset<accent.zOffset);
+    assert.ok(roof.zOffsetUnits<facade.zOffsetUnits);
+  }
+  scene.dispose();engine.dispose();
+});

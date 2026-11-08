@@ -101,6 +101,15 @@ export function buildArchitecture(template: ObjectTemplate, scene: Scene, materi
           }
         }
         mesh.setVerticesData('uv', uvs);
+        if (facade) {
+          // Every facade volume has a roof above it; two coincident top faces cause z-fighting.
+          const indices = mesh.getIndices()!, visible: number[] = [];
+          for (let i = 0; i < indices.length; i += 3) {
+            if ([indices[i]!, indices[i + 1]!, indices[i + 2]!].every(index => normals[index * 3 + 1]! > .5)) continue;
+            visible.push(indices[i]!, indices[i + 1]!, indices[i + 2]!);
+          }
+          mesh.setIndices(visible);
+        }
       }
       pieces.push(mesh);
       if (surfaceMaterial && masonry && panelled && !accent && !role && detail === 0) {

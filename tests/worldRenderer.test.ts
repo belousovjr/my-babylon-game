@@ -72,3 +72,17 @@ test('trees select three LODs at close distances and the distant model is tiny',
   }
   scene.dispose();engine.dispose();
 });
+
+test('stationary LOD requests are cached, while edits and movement invalidate them',()=>{
+  const {engine,scene,city}=setup();city.rebuild(true);
+  const original=city.lodTransitions.request.bind(city.lodTransitions);let requests=0;
+  city.lodTransitions.request=(...args)=>{requests++;original(...args);};
+  const eye=Vector3.Zero();city.updateLODs(eye,eye,true,null,-1,0);
+  const initial=requests;assert.ok(initial>0);
+  city.updateLODs(eye,eye,true,null,-1,0);assert.equal(requests,initial);
+  eye.x=1;city.updateLODs(eye,eye,true,null,-1,0);assert.ok(requests>initial);
+  const moved=requests;city.updateCellCoverage(city.meshes.get('first')!);
+  city.updateLODs(eye,eye,true,null,-1,0);assert.ok(requests>moved);
+  const edited=requests;city.updateLODs(eye,eye,true,null,-1,1);assert.ok(requests>edited,'night changes furniture visibility');
+  scene.dispose();engine.dispose();
+});

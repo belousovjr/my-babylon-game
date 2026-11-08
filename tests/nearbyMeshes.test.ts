@@ -29,3 +29,14 @@ test('nearby cache includes hidden and large colliders by bounds and refreshes a
   cache.setSources([]);assert.deepEqual(cache.get(Vector3.Zero(),12),[]);
   scene.dispose();engine.dispose();
 });
+
+test('parent movement is reflected before the next render frame',()=>{
+  const engine=new NullEngine(),scene=new Scene(engine),cache=new NearbyMeshes();
+  const parent=MeshBuilder.CreateBox('parent',{},scene),collider=MeshBuilder.CreateBox('child',{},scene);
+  collider.parent=parent;collider.checkCollisions=true;collider.computeWorldMatrix(true);
+  cache.setSources([collider]);assert.ok(cache.get(Vector3.Zero(),12).includes(collider));
+  parent.position.x=100;cache.invalidate();
+  assert.ok(!cache.get(Vector3.Zero(),12).includes(collider));
+  assert.ok(cache.get(new Vector3(100,0,0),12).includes(collider));
+  scene.dispose();engine.dispose();
+});

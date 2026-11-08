@@ -171,8 +171,9 @@ def main():
     # No almost-coplanar ground beneath paving: it flickers through at overview distances.
     assert exposed_ground.intersection(pavement).area<1e-6
     # Triangulate first, then batch: cutting polygons at cell borders introduces extra seam vertices.
+    grass_surface=unary_union(parks).intersection(exposed_ground)
     terrain_cells=defaultdict(list)
-    for tri in triangles(exposed_ground):
+    for tri in triangles(exposed_ground.difference(grass_surface)):
         cell=tuple(math.floor(sum(p[i] for p in tri)/3/256)*256 for i in [0,1])
         terrain_cells[cell].append(tri)
     terrain=[dict(cell=list(cell),triangles=tris) for cell,tris in sorted(terrain_cells.items())]
@@ -188,7 +189,7 @@ def main():
     terrace_lines=rings(river_buffer.intersection(bounds))
     signals=traffic_signals(roads,sidewalks,road_union)
     lamps=[lamp for lamp in street_lamps(roads,sidewalks,road_union) if all(math.dist(lamp['position'],signal['position'])>1.5 for signal in signals)]
-    env=dict(crosswalks=pedestrian_crossings(signals,roads,sidewalks,road_union),trafficSignals=signals,lamps=lamps,railway=railway,roadSurface=triangles(road_union),sidewalks=triangles(sidewalks),curbs=triangles(curbs),pavingEdges=paving_edges,terraceWalls=terrace_lines,origin=[LON,LAT],bounds=list(map(rounded,bounds.bounds)),roads=roads,terrain=terrain,water=triangles(water),riverwalk=triangles(riverwalk),parks=[tri for p in parks for tri in triangles(p.intersection(exposed_ground))],shorelines=rings(water),bridgeDeck=triangles(bridge),bridgeEdges=rings(bridge),bridgeAbutments=rings(abutments),bridgeRails=[[[float(x),float(z)] for x,z in line.coords] for line in rail_lines if line.geom_type=='LineString' and line.length>1])
+    env=dict(crosswalks=pedestrian_crossings(signals,roads,sidewalks,road_union),trafficSignals=signals,lamps=lamps,railway=railway,roadSurface=triangles(road_union),sidewalks=triangles(sidewalks),curbs=triangles(curbs),pavingEdges=paving_edges,terraceWalls=terrace_lines,origin=[LON,LAT],bounds=list(map(rounded,bounds.bounds)),roads=roads,terrain=terrain,water=triangles(water),riverwalk=triangles(riverwalk),parks=triangles(grass_surface),shorelines=rings(water),bridgeDeck=triangles(bridge),bridgeEdges=rings(bridge),bridgeAbutments=rings(abutments),bridgeRails=[[[float(x),float(z)] for x,z in line.coords] for line in rail_lines if line.geom_type=='LineString' and line.length>1])
     env['waterbed']=waterbed_geometry(water)
     output=dict(world=world,environment=env,report=dict(buildings=len(objects),protectedBuildings=protected_ids,fittedBuildings=fitted_count,omittedBuildings=skipped_count,roads=len(roads),families=dict(families),heights=dict(heights),bounds=BBOX,origin=[LON,LAT],licence='ODbL-1.0',attribution='© OpenStreetMap contributors',waterArea=rounded(water.area)))
     assert len({o['id'] for o in objects})==len(objects), 'Duplicate OSM building IDs'

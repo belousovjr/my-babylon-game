@@ -53,6 +53,8 @@ test('procedural streets have upward floors and walkable spawn without one objec
   const engine=new NullEngine(),scene=new Scene(engine),mat=new StandardMaterial('surface',scene);
   const {meshes,props}=drawChicagoStreets(scene,()=>mat);
   assert.ok(meshes.length<1000,'cell batching keeps mesh count bounded');
+  const lawns=meshes.filter(mesh=>mesh.name.includes('#71896a'));
+  assert.ok(lawns.length>0 && lawns.every(mesh=>mesh.checkCollisions),'lawns themselves support actors after the underlying terrain is removed');
   assert.ok(props.some(p=>p.templateId==='tree')&&props.some(p=>p.templateId==='lamp'));
   for(const m of meshes) {
     assert.ok(m.metadata.procedural);assert.ok(m.getTotalIndices()>0);

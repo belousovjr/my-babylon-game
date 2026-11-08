@@ -28,6 +28,7 @@ function resizeRenderer() {
   engine.setHardwareScalingLevel(Math.max(1, canvas.clientWidth / RENDER_SETTINGS.width, canvas.clientHeight / RENDER_SETTINGS.height));
 }
 resizeRenderer();
+engine.renderEvenInBackground = false;
 const scene = new Scene(engine);
 scene.clearColor = Color4.FromHexString('#bacbccff');
 scene.collisionsEnabled = true;
@@ -102,7 +103,9 @@ void loadCharacter().finally(() => { characterReady = true; });
 let accumulator = 0;
 let statsTime = 0;
 let lodTime = 0;
+const fadedLastFrame = new Set<Mesh>();
 engine.runRenderLoop(() => {
+  if (document.hidden) { accumulator = 0; return; }
   const dt = Math.min(engine.getDeltaTime() / 1000, 0.1);
   if (!starting && !editor.editing && !document.hidden) {
     accumulator += dt;
@@ -126,11 +129,17 @@ engine.runRenderLoop(() => {
   lodTime += dt;
   if (starting || city.initialLods || lodTime >= RENDER_SETTINGS.lodInterval) { updateLODs(); lodTime = 0; }
   if (starting || city.initialLods) { city.lodTransitions.settle(); city.initialLods = false; }
-  for (const root of city.modelLevels.keys()) city.lodTransitions.opacity(root, root.visibility);
+  const opacityChanged = fadedLastFrame.size > 0;
+  // Only camera-obscuring roots change opacity; include last frame to restore cleared blockers.
+  for (const root of fadedLastFrame) if (!root.isDisposed()) city.lodTransitions.opacity(root, root.visibility);
+  fadedLastFrame.clear();
+  for (const root of cameraBoom.fadedMeshes) {
+    city.lodTransitions.opacity(root, root.visibility); fadedLastFrame.add(root);
+  }
   city.lodTransitions.update(dt);
   cityMaterials.setNight(lighting.night);
   beacons.update(dt);
-  lighting.update(eye, dt);
+  lighting.update(eye, dt, starting || city.lodTransitions.busy || opacityChanged || fadedLastFrame.size > 0);
   scene.render();
   if (starting && characterReady && scene.isReady()) {
     starting = false;

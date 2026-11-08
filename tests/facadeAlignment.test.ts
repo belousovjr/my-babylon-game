@@ -207,3 +207,23 @@ test('Marina concrete cylinders unwrap continuously and ground floor starts at a
     assert.equal(checked,3);
   } finally { spy.mock.restore(); scene.dispose(); engine.dispose(); }
 });
+
+test('roofed facade volumes never retain a coincident upward-facing cap',()=>{
+  const engine=new NullEngine(),scene=new Scene(engine),body=new StandardMaterial('body',scene),detail=new StandardMaterial('roof-and-details',scene);
+  const original=Mesh.MergeMeshes;let checked=0;
+  const spy=mock.method(Mesh,'MergeMeshes',(...args: Parameters<typeof Mesh.MergeMeshes>)=>{
+    for(const mesh of args[0].filter(m=>m.material===body)) {
+      const normals=mesh.getVerticesData('normal')!,indices=mesh.getIndices()!;
+      for(let i=0;i<indices.length;i+=3) assert.ok(!indices.slice(i,i+3).every(index=>normals[index*3+1]!>.5),'facade cap must be removed underneath the roof');
+      checked++;
+    }
+    return original(...args);
+  });
+  try {
+    for(const profile of ['box','glass','stone','deco','bundled','rounded','marina','gothic','clock'] as const) {
+      buildArchitecture({id:profile,name:profile,kind:'building',profile,size:[36,100,30],color:'#ffffff',lodDistances:[100,200]},scene,body,detail,[0],
+        (_lod,accent,_light,role)=>accent||role?detail:body).forEach(mesh=>mesh.dispose());
+    }
+    assert.ok(checked>30);
+  } finally {spy.mock.restore();scene.dispose();engine.dispose();}
+});

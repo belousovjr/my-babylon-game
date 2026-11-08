@@ -14,14 +14,20 @@ export function predictLodEye(previous: Vector3, eye: Vector3, dt: number, resul
 }
 
 export function lodDistance(eye: Vector3, predicted: Vector3, bounds: { minimumWorld: Vector3; maximumWorld: Vector3 }) {
-  return Math.min(Vector3.Distance(eye, Vector3.Clamp(eye, bounds.minimumWorld, bounds.maximumWorld)),
-    Vector3.Distance(predicted, Vector3.Clamp(predicted, bounds.minimumWorld, bounds.maximumWorld)));
+  const squaredDistance = (point: Vector3) => {
+    const dx = Math.max(bounds.minimumWorld.x - point.x, 0, point.x - bounds.maximumWorld.x);
+    const dy = Math.max(bounds.minimumWorld.y - point.y, 0, point.y - bounds.maximumWorld.y);
+    const dz = Math.max(bounds.minimumWorld.z - point.z, 0, point.z - bounds.maximumWorld.z);
+    return dx * dx + dy * dy + dz * dz;
+  };
+  return Math.sqrt(Math.min(squaredDistance(eye), squaredDistance(predicted)));
 }
 
 type Level = Mesh | InstancedMesh;
 type Group = { meshes: Level[]; plugins: DitheredTileFadeMaterialPlugin[][]; weights: number[]; from: number[]; target: number; elapsed: number; active: boolean; opacity: number };
 
 export class LodTransitions {
+  get busy() { return this.active.size > 0 || this.pending.size > 0; }
   private groups = new Map<object, Group>();
   private pending = new Set<Group>();
   private active = new Set<Group>();

@@ -22,7 +22,7 @@ export class NearbyMeshes {
     const limit = (radius + 8) ** 2;
     this.nearby = this.sources.filter(mesh => {
       if (mesh.isDisposed() || !mesh.isEnabled() || !mesh.checkCollisions) return false;
-      mesh.computeWorldMatrix(true);
+      mesh.computeWorldMatrix(!!mesh.parent || !mesh.isSynchronized());
       const box = mesh.getBoundingInfo().boundingBox;
       const dx = Math.max(box.minimumWorld.x - centre.x, 0, centre.x - box.maximumWorld.x);
       const dy = Math.max(box.minimumWorld.y - centre.y, 0, centre.y - box.maximumWorld.y);

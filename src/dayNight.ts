@@ -65,6 +65,7 @@ export class DayNight {
   private casters: AbstractMesh[] = [];
   private elapsed = 0;
   private wind = 0;
+  private shadowState: number[] | null = null;
   get hour() { return this.state.hour; }
   get night() { return this.state.night; }
 
@@ -91,7 +92,7 @@ export class DayNight {
     this.shadows.filteringQuality = ShadowGenerator.QUALITY_MEDIUM;
     this.shadows.bias = 0.0005; this.shadows.normalBias = 0.12;
     this.shadows.setDarkness(0.22);
-    this.shadows.getShadowMap()!.refreshRate = this.shadows instanceof CascadedShadowGenerator ? 1 : 2;
+    this.shadows.getShadowMap()!.refreshRate = 0;
     this.sky = new ShaderMaterial('day-night-sky', scene, { vertexSource, fragmentSource }, {
       attributes: ['position'], uniforms: ['worldViewProjection', 'sunDirection', 'hazeColor', 'day', 'sunset', 'wind'],
     });
@@ -101,7 +102,7 @@ export class DayNight {
     this.streetLights = Array.from({ length: 4 }, (_, i) => {
       const light = new SpotLight(`nearby-street-light-${i}`, Vector3.Zero(), Vector3.Down(), Math.PI * 0.78, 2, scene);
       light.diffuse = new Color3(1, 0.73, 0.4); light.specular = new Color3(0.35, 0.25, 0.14);
-      light.range = 22; light.intensity = 0;
+      light.range = 22; light.intensity = 0; light.setEnabled(false);
       // Empty inclusion means "all meshes" in Babylon, so the sky is our inert placeholder.
       light.includedOnlyMeshes = [this.skyMesh];
       return light;
@@ -110,6 +111,7 @@ export class DayNight {
   }
 
   setTime(hour: number) {
+    this.shadowState = null;
     this.state = daylightAt(hour);
     const { day, night, sunset, sun } = this.state;
     this.sky.setVector3('sunDirection', sun).setFloat('day', day).setFloat('sunset', sunset);
@@ -129,6 +131,7 @@ export class DayNight {
   }
 
   setWorld(lamps: Mesh[], receivers: AbstractMesh[]) {
+    this.shadowState = null;
     this.lamps = lamps.map(root => ({ position: Vector3.TransformCoordinates(new Vector3(0.45, 0.4, 0), root.computeWorldMatrix(true)) }));
     // Hardware instances share their source light list; ground pools use a shared lightmap, live spotlights affect moving actors.
     this.receivers = receivers.filter(mesh => !mesh.isAnInstance && !mesh.metadata?.procedural && mesh.getTotalVertices() > 0);
@@ -137,12 +140,12 @@ export class DayNight {
     this.elapsed = 1;
   }
 
-  update(eye: Vector3, dt: number) {
+  update(eye: Vector3, dt: number, dynamicShadows = false) {
     this.wind += dt * 0.002;
     this.sky.setFloat('wind', this.wind);
     this.sun.position.copyFrom(eye).addInPlaceFromFloats(-this.sun.direction.x * 800, -eye.y - this.sun.direction.y * 800, -this.sun.direction.z * 800);
     this.elapsed += dt;
-    if (this.elapsed < 0.3) return;
+    if (this.elapsed < 0.3) { this.refreshShadows(dynamicShadows); return; }
     this.elapsed = 0;
     const nearby = this.night > 0.05 ? nearestLamps(this.lamps, eye) : [];
     this.streetLights.forEach((light, i) => {
@@ -152,7 +155,7 @@ export class DayNight {
       if (lamp) light.position.copyFrom(lamp.position);
       const meshes = lamp ? this.receivers.filter(mesh => {
         if (mesh.isDisposed() || !mesh.isEnabled()) return false;
-        mesh.computeWorldMatrix(true);
+        mesh.computeWorldMatrix(!!mesh.parent || !mesh.isSynchronized());
         const b = mesh.getBoundingInfo().boundingBox;
         return Vector3.DistanceSquared(lamp.position, Vector3.Clamp(lamp.position, b.minimumWorld, b.maximumWorld)) < light.range ** 2;
       }) : [];
@@ -161,12 +164,14 @@ export class DayNight {
         light.includedOnlyMeshes = included;
       }
       light.intensity = intensity;
+      const enabled = intensity > 0 && meshes.length > 0;
+      if (light.isEnabled() !== enabled) light.setEnabled(enabled);
     });
     if (this.sun.shadowEnabled) {
       // Caster selection must not pop at a distance or when a nearer building takes a budget slot.
       this.shadows.getShadowMap()!.renderList = this.casters.filter(mesh => {
         if (mesh.isDisposed() || !mesh.isEnabled() || !mesh.isVisible) return false;
-        mesh.computeWorldMatrix(true);
+        mesh.computeWorldMatrix(!!mesh.parent || !mesh.isSynchronized());
         const { minimumWorld: min, maximumWorld: max } = mesh.getBoundingInfo().boundingBox;
         // Include the projected shadow, not just the building; the extra 100 m stays outside cascade coverage.
         const travel = Math.max(0, max.y - Math.min(0, eye.y)) / Math.max(.06, -this.sun.direction.y);
@@ -176,5 +181,22 @@ export class DayNight {
         return dx * dx + dz * dz < 500 ** 2;
       });
     } else this.shadows.getShadowMap()!.renderList = [];
+    this.refreshShadows(dynamicShadows);
+  }
+
+  private refreshShadows(dynamic: boolean) {
+    if (!this.sun.shadowEnabled) return;
+    const map = this.shadows.getShadowMap()!, casters = map.renderList ?? [];
+    if (dynamic || casters.some(mesh => mesh.skeleton)) {
+      map.resetRefreshCounter(); this.shadowState = null; return;
+    }
+    const camera = this.scene.activeCamera;
+    const state = [...this.sun.position.asArray(), ...this.sun.direction.asArray()];
+    if (camera) state.push(...camera.getViewMatrix().m, ...camera.getProjectionMatrix().m);
+    for (const mesh of casters) {
+      state.push(mesh.uniqueId, mesh.isEnabled() && mesh.isVisible ? 1 : 0, mesh.visibility, ...mesh.computeWorldMatrix(!!mesh.parent || !mesh.isSynchronized()).m);
+    }
+    if (!this.shadowState || state.length !== this.shadowState.length || state.some((value, i) => value !== this.shadowState![i])) map.resetRefreshCounter();
+    this.shadowState = state;
   }
 }

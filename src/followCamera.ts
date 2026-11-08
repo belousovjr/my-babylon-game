@@ -66,6 +66,7 @@ export class FollowCamera {
   private distance: number | null = null;
   private previousTarget: Vector3 | null = null;
   private faded = new Map<Mesh, number>();
+  get fadedMeshes(): Iterable<Mesh> { return this.faded.keys(); }
 
   reset() {
     for (const [mesh, value] of this.faded) if (!mesh.isDisposed()) mesh.visibility = value;

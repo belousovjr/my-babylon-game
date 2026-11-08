@@ -5,7 +5,7 @@ import type { Scene } from '@babylonjs/core/scene.js';
 import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
 import '@babylonjs/core/Meshes/instancedMesh.js';
 import type { InstancedMesh } from '@babylonjs/core/Meshes/instancedMesh.js';
-import type { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
+import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
 import { CELL_SIZE, cellAt, createWorld, objectProperties } from './world.ts';
 import type { WorldData, WorldObject, ObjectTemplate } from './world.ts';
 import { attachCollisionGeometry, buildArchitecture, createCollisionPrototype, setArchitectureStatic } from './architecture.ts';
@@ -25,6 +25,11 @@ export class WorldRenderer {
   initialLods = true;
   activeCell = '';
   world: WorldData;
+  private lodDirty = true;
+  private lodEye = new Vector3(Infinity, Infinity, Infinity);
+  private lodPredicted = new Vector3(Infinity, Infinity, Infinity);
+  private lodMode = '';
+  private modelTemplates = new WeakMap<Mesh, ObjectTemplate>();
   private scene: Scene;
   private materials: CityMaterials;
   private beacons: Beacons;
@@ -38,6 +43,7 @@ export class WorldRenderer {
   }
 
   updateCellCoverage(mesh: Mesh) {
+    this.lodDirty = true;
     const template = this.world.templates.find(t => t.id === mesh.metadata.templateId);
     if (template && mesh.metadata.windowMapping !== windowMappingKey(template, mesh.scaling.y)) {
       for (const child of mesh.getChildMeshes()) child.dispose();
@@ -54,6 +60,8 @@ export class WorldRenderer {
   }
   private attachModel(root: Mesh, template: ObjectTemplate, color: string, pickable: boolean) {
     if (template.profile === 'tree') template = { ...template, lodDistances: [25, 65] };
+    this.lodDirty = true;
+    this.modelTemplates.set(root, template);
     const headings = root.metadata.signalHeadings as number[] | undefined;
     const bodySurface = template.profile === 'stone' && root.scaling.y < 36 ? 'facade-brick' : buildingSurface(template);
     const variant = template.profile === 'tree' ? treeVariant(root.name) : template.kind === 'building' ? facadeVariant(root.name) : 0;
@@ -102,10 +110,14 @@ export class WorldRenderer {
   }
 
   updateLODs(eye: Vector3, predictedLodEye: Vector3, editing: boolean, selected: Mesh | null, previewLod: number, night: number) {
+    const mode = `${editing}:${selected?.uniqueId ?? -1}:${previewLod}:${night}`;
+    if (!this.lodDirty && this.lodMode === mode && this.lodEye.equals(eye) && this.lodPredicted.equals(predictedLodEye)) return;
+    this.lodDirty = false; this.lodMode = mode;
+    this.lodEye.copyFrom(eye); this.lodPredicted.copyFrom(predictedLodEye);
     for (const [root, levels] of this.modelLevels) {
       if (root.isDisposed() || !root.isEnabled()) continue;
-      const template = this.world.templates.find(t => t.id === root.metadata.templateId)!;
-      root.computeWorldMatrix(true);
+      const template = this.modelTemplates.get(root)!;
+      root.computeWorldMatrix(!root.isSynchronized());
       const bounds = root.getBoundingInfo().boundingBox;
       const distance = lodDistance(eye, predictedLodEye, bounds);
       const level = editing && root === selected && previewLod >= 0 ? Math.min(previewLod, levels.length - 1) : (template.profile === 'tree' ? [25, 65] : template.lodDistances ?? []).filter(d => distance >= d).length;
@@ -116,6 +128,7 @@ export class WorldRenderer {
     updateStreetDetailLODs(this.proceduralMeshes, eye, (key, levels, level) => this.lodTransitions.request(key, levels, level), predictedLodEye);
   }
   rebuild(editing: boolean) {
+    this.lodDirty = true;
     const farLods = this.world.templates.filter(t => t.kind === 'building' && t.lodDistances?.length)
       .map(t => t.lodDistances!.at(-1)!).sort((a, b) => a - b);
     this.scene.fogEnd = (farLods[Math.floor(farLods.length / 2)] ?? 650) / 0.6;
@@ -159,6 +172,7 @@ export class WorldRenderer {
     const cell = cellAt(position.x, position.z);
     if (cell !== this.activeCell) {
       this.activeCell = cell;
+      this.lodDirty = true;
       const [cx, cz] = cell.split(',').map(Number);
       // shortcut: cells only toggle existing meshes; load/unload assets when the map outgrows memory.
       for (const m of this.meshes.values()) {

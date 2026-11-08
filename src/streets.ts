@@ -19,10 +19,13 @@ export function elevationAt(_x: number, _z: number, surface: 'street' | 'sidewal
   return { street: 0, sidewalk: 0.16, water: WATER_LEVEL, riverwalk: -3.8 }[surface];
 }
 
+const streetLodGroups = new WeakMap<Mesh[], Map<string, Mesh[]>>();
+
 // Visibility never disables the near mesh: its collision geometry remains available.
 export function updateStreetDetailLODs(meshes: Mesh[], eye: Vector3, transition?: (key: Mesh, levels: Mesh[], level: number) => void, predictedEye = eye) {
-  const groups = transition ? new Map<string, Mesh[]>() : null;
-  for (const mesh of meshes) {
+  const cached = transition ? streetLodGroups.get(meshes) : undefined;
+  const groups = transition ? cached ?? new Map<string, Mesh[]>() : null;
+  if (!cached) for (const mesh of meshes) {
     const layer = mesh.metadata?.detailLayer;
     if (!layer || layer === 'world') continue;
     if (groups) {
@@ -37,6 +40,7 @@ export function updateStreetDetailLODs(meshes: Mesh[], eye: Vector3, transition?
       mesh.isVisible = distance < far && (mesh.metadata.detailLevel === 0 ? distance < near : distance >= near);
     }
   }
+  if (groups && !cached) streetLodGroups.set(meshes, groups);
   if (groups) for (const levels of groups.values()) {
     const first = levels[0] ?? levels[1]!;
     const bounds = first.metadata.lodBounds ?? first.getBoundingInfo().boundingBox;
@@ -127,7 +131,7 @@ export function drawChicagoStreets(scene: Scene, material: (color: string, lod: 
   surface(data.water, elevationAt(0, 0, 'water'), '#517d85', false);
   surface(data.waterbed, riverbedElevation, '#6a644e', true);
   surface(data.riverwalk, elevationAt(0, 0, 'riverwalk'), '#b1a993', true);
-  surface(data.parks, 0.015, '#71896a', false);
+  surface(data.parks, elevationAt(0, 0), '#71896a', true);
   }
   drawTerrain();
   surface(data.roadSurface, 0.03, '#454e50', true);

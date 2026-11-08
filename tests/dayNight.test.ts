@@ -1,6 +1,6 @@
 import '@babylonjs/core/Meshes/instancedMesh.js';
 import { strict as assert } from 'node:assert';
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
 import { NullEngine } from '@babylonjs/core/Engines/nullEngine.js';
 import { Scene } from '@babylonjs/core/scene.js';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
@@ -80,4 +80,24 @@ test('window and lamp emission updates at every LOD without adding textures to l
   assert.ok(facades.every(material => material.emissiveTexture.level === 0));
   assert.equal(materials.get('#ffffff', 'facade-stone').emissiveTexture.level, 0, 'new/editor materials inherit current time');
   scene.dispose(); engine.dispose();
+});
+
+
+test('idle shadows stay cached and local lamps are disabled whenever they contribute no light',()=>{
+  const engine=new NullEngine(),scene=new Scene(engine),lighting=new DayNight(scene);
+  const actor=MeshBuilder.CreateBox('actor',{},scene),lamp=MeshBuilder.CreateBox('lamp',{},scene);lamp.position.y=5;
+  lighting.setWorld([lamp],[actor]);
+  const spy=mock.method(lighting.shadows.getShadowMap(),'resetRefreshCounter');
+  try {
+    lighting.update(Vector3.Zero(),1);
+    const initial=spy.mock.callCount();assert.ok(initial>0);
+    lighting.update(Vector3.Zero(),.01);assert.equal(spy.mock.callCount(),initial,'identical view and geometry reuse the map');
+    actor.position.x=1;lighting.update(Vector3.Zero(),.01);assert.ok(spy.mock.callCount()>initial,'moving geometry invalidates shadows');
+    const moved=spy.mock.callCount();lighting.update(Vector3.Zero(),.01,true);assert.ok(spy.mock.callCount()>moved,'LOD/opacity transitions force refresh');
+    assert.ok(lighting.streetLights.every(light=>!light.isEnabled()),'daytime lamps are actually disabled');
+    lighting.setTime(0);lighting.update(Vector3.Zero(),1);
+    assert.ok(lighting.streetLights.some(light=>light.isEnabled()),'nearby night lighting wakes up');
+    lighting.update(new Vector3(1000,0,0),1);
+    assert.ok(lighting.streetLights.every(light=>!light.isEnabled()),'unused night lights switch off');
+  } finally {spy.mock.restore();scene.dispose();engine.dispose();}
 });

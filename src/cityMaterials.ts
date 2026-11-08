@@ -82,8 +82,8 @@ export class CityMaterials {
         rightColor: new Color3(metal ? 0.12 : 0.035, metal ? 0.12 : 0.035, metal ? 0.12 : 0.035), power: 3,
       });
     }
-    // Grass sits only 1.5 cm above terrain; keep that overlay stable at distant viewing angles.
-    const depthPriority = street && surface === 'grass' ? Math.max(1, priority) : priority;
+    // Explicit surface priorities keep shared edges stable; terrain and lawns have no overlapping faces.
+    const depthPriority = surface === 'roof' ? Math.max(2, priority) : street && surface === 'grass' ? Math.max(1, priority) : priority;
     material.zOffset = -depthPriority; material.zOffsetUnits = -depthPriority;
     if (surface !== 'plain' && surface !== 'light' && surface !== 'foliage') {
       material.diffuseTexture = this.texture(`${surface}-${level}`, true);

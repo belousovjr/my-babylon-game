@@ -41,7 +41,7 @@ class StreetGeometryTests(unittest.TestCase):
         import json
         data=json.loads((Path(__file__).resolve().parents[1]/'src/generated/chicago.json').read_text())['environment']
         paving=unary_union([Polygon(t) for key in ['roadSurface','sidewalks','curbs'] for t in data[key]])
-        ground=unary_union([Polygon(t) for cell in data['terrain'] for t in cell['triangles']])
+        ground=unary_union([Polygon(t) for cell in data['terrain'] for t in cell['triangles']]+[Polygon(t) for t in data['parks']])
         self.assertLess(ground.intersection(paving).area,0.01)
 
     def test_sidewalk_uses_one_contour_at_unequal_width_junction(self):
@@ -65,7 +65,7 @@ class StreetGeometryTests(unittest.TestCase):
         import json
         data=json.loads((Path(__file__).resolve().parents[1]/'src/generated/chicago.json').read_text())['environment']
         river=unary_union([Polygon(t) for key in ['water','riverwalk'] for t in data[key]])
-        ground=unary_union([Polygon(t) for cell in data['terrain'] for t in cell['triangles']])
+        ground=unary_union([Polygon(t) for cell in data['terrain'] for t in cell['triangles']]+[Polygon(t) for t in data['parks']])
         for x,z in [(600.75,129.48),(632.49,129.78)]:
             point=Point(x,z)
             self.assertGreater(river.distance(point),20)
@@ -114,7 +114,7 @@ class StreetGeometryTests(unittest.TestCase):
     def test_generated_surfaces_cover_map_and_all_paving_edges_have_sides(self):
         import json
         data=json.loads((Path(__file__).resolve().parents[1]/'src/generated/chicago.json').read_text())['environment']
-        terrain=unary_union([Polygon(t) for cell in data['terrain'] for t in cell['triangles']])
+        terrain=unary_union([Polygon(t) for cell in data['terrain'] for t in cell['triangles']]+[Polygon(t) for t in data['parks']])
         regions=[terrain]+[unary_union([Polygon(t) for t in data[key]]) for key in ['roadSurface','sidewalks','curbs','water','riverwalk']]
         missing=box(*data['bounds']).difference(unary_union(regions))
         self.assertLess(missing.area,1e-5,'no horizontal gaps anywhere in the generated map')
@@ -168,7 +168,7 @@ class StreetGeometryTests(unittest.TestCase):
         import json
         data=json.loads((Path(__file__).resolve().parents[1]/'src/generated/chicago.json').read_text())
         env=data['environment']
-        ground=unary_union([Polygon(t) for cell in env['terrain'] for t in cell['triangles']])
+        ground=unary_union([Polygon(t) for cell in env['terrain'] for t in cell['triangles']]+[Polygon(t) for t in env['parks']])
         pavement=unary_union([Polygon(t) for key in ['roadSurface','sidewalks','curbs'] for t in env[key]])
         for o in data['world']['objects']:
             footprint=building_footprint(o)
@@ -283,7 +283,7 @@ class StreetGeometryTests(unittest.TestCase):
         sidewalk=unary_union([Polygon(t) for key in ['sidewalks','curbs'] for t in env[key]])
         deck=unary_union([Polygon(t) for t in env['railway']['deck']])
         self.assertGreater(len(env['railway']['supports']),10)
-        ground=unary_union([Polygon(t) for cell in env['terrain'] for t in cell['triangles']])
+        ground=unary_union([Polygon(t) for cell in env['terrain'] for t in cell['triangles']]+[Polygon(t) for t in env['parks']])
         supports=env['railway']['supports']
         for i,support in enumerate(supports):
             x,base,z=support['position'];point=Point(x,z)
@@ -344,7 +344,7 @@ class StreetGeometryTests(unittest.TestCase):
         asphalt=unary_union([Polygon(t) for t in env['roadSurface']])
         sidewalk=unary_union([Polygon(t) for key in ['sidewalks','curbs'] for t in env[key]])
         water=unary_union([Polygon(t) for t in env['water']]).buffer(7)
-        ground=unary_union([Polygon(t) for cell in env['terrain'] for t in cell['triangles']])
+        ground=unary_union([Polygon(t) for cell in env['terrain'] for t in cell['triangles']]+[Polygon(t) for t in env['parks']])
         deck=unary_union([Polygon(t) for t in env['railway']['deck']])
         points=[]
         for ring in env['railway']['edges']:
@@ -582,3 +582,14 @@ class StreetGeometryTests(unittest.TestCase):
             crossings=[c for c in env['crosswalks'] if Point(c['junction']).distance(centre)<1]
             self.assertEqual(len(signals),2,'both Michigan carriageways need signals')
             self.assertGreaterEqual(len(crossings),2,'both Michigan carriageways need crosswalks')
+
+class LawnSurfaceTests(unittest.TestCase):
+    def test_generated_lawns_have_no_duplicate_faces_or_ground_underneath(self):
+        import json
+        env=json.loads((Path(__file__).resolve().parents[1]/'src/generated/chicago.json').read_text())['environment']
+        pieces=[Polygon(t) for t in env['parks']]
+        grass=unary_union(pieces)
+        ground=unary_union([Polygon(t) for cell in env['terrain'] for t in cell['triangles']])
+        self.assertGreater(grass.area,0)
+        self.assertLess(abs(sum(p.area for p in pieces)-grass.area),1e-6,'overlapping parks cause grass/grass z-fighting')
+        self.assertLess(ground.intersection(grass).area,1e-6,'terrain must be cut out beneath lawns')
