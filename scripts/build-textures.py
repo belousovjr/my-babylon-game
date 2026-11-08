@@ -155,7 +155,7 @@ def street_lightmap(out):
         # Extend the pool beyond the footprint so the building cannot hide its own spill.
         a, b = point(x - width / 2 - 4, z - depth / 2 - 4), point(x + width / 2 + 4, z + depth / 2 + 4)
         draw.rectangle((*a, *b), outline=(63, 48, 32), width=3)
-    spill = spill.filter(ImageFilter.GaussianBlur(.75))
+    spill = spill.filter(ImageFilter.GaussianBlur(2.25))
     pools = Image.new('RGB', (size, size))
     # Additive soft footprints stay visible independently of the observer and the four live lights.
     radius = 11 * max(scale_x, scale_z)
