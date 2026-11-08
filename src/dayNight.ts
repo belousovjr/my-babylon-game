@@ -65,6 +65,8 @@ export class DayNight {
   private casters: AbstractMesh[] = [];
   private elapsed = 0;
   private wind = 0;
+  shadowsEnabled = true;
+  localLightsEnabled = true;
   private shadowState: number[] | null = null;
   get hour() { return this.state.hour; }
   get night() { return this.state.night; }
@@ -110,6 +112,10 @@ export class DayNight {
     this.setTime(14);
   }
 
+  setAtmosphereEnabled(enabled: boolean) {
+    this.skyMesh.isVisible = enabled; this.scene.fogEnabled = enabled;
+  }
+
   setTime(hour: number) {
     this.shadowState = null;
     this.state = daylightAt(hour);
@@ -147,7 +153,7 @@ export class DayNight {
     this.elapsed += dt;
     if (this.elapsed < 0.3) { this.refreshShadows(dynamicShadows); return; }
     this.elapsed = 0;
-    const nearby = this.night > 0.05 ? nearestLamps(this.lamps, eye) : [];
+    const nearby = this.localLightsEnabled && this.night > 0.05 ? nearestLamps(this.lamps, eye) : [];
     this.streetLights.forEach((light, i) => {
       const lamp = nearby[i];
       const distance = lamp ? Math.hypot(lamp.position.x - eye.x, lamp.position.z - eye.z) : 36;
@@ -167,7 +173,7 @@ export class DayNight {
       const enabled = intensity > 0 && meshes.length > 0;
       if (light.isEnabled() !== enabled) light.setEnabled(enabled);
     });
-    if (this.sun.shadowEnabled) {
+    if (this.shadowsEnabled && this.sun.shadowEnabled) {
       // Caster selection must not pop at a distance or when a nearer building takes a budget slot.
       this.shadows.getShadowMap()!.renderList = this.casters.filter(mesh => {
         if (mesh.isDisposed() || !mesh.isEnabled() || !mesh.isVisible) return false;
@@ -185,9 +191,9 @@ export class DayNight {
   }
 
   private refreshShadows(dynamic: boolean) {
-    if (!this.sun.shadowEnabled) return;
+    if (!this.shadowsEnabled || !this.sun.shadowEnabled) return;
     const map = this.shadows.getShadowMap()!, casters = map.renderList ?? [];
-    if (dynamic || casters.some(mesh => mesh.skeleton)) {
+    if (dynamic || this.scene.animationsEnabled && casters.some(mesh => mesh.skeleton)) {
       map.resetRefreshCounter(); this.shadowState = null; return;
     }
     const camera = this.scene.activeCamera;

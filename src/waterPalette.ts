@@ -19,7 +19,7 @@ export class WaterPalette extends MaterialPluginBase {
   bindForSubMesh(buffer: UniformBuffer, scene: Scene) {
     const rate = 1 / Math.max(1, scene.fogEnd - scene.fogStart);
     const landRate = scene.fogEnabled && this._material.fogEnabled && scene.fogMode === Scene.FOGMODE_LINEAR ? rate : 0;
-    buffer.updateFloat4('waterFog', 5 * rate, landRate, scene.fogStart, Math.min(1, Math.max(.1, scene.fogColor.r / .73)));
+    buffer.updateFloat4('waterFog', scene.fogEnabled ? 5 * rate : 0, landRate, scene.fogStart, Math.min(1, Math.max(.1, scene.fogColor.r / .73)));
   }
 
   getCustomCode(shaderType: string) {

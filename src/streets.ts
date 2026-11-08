@@ -259,7 +259,7 @@ export function drawChicagoStreets(scene: Scene, material: (color: string, lod: 
         (ny > 0.5 ? b.positions[i + 2]! : b.positions[i + 1]!) / 4);
     }
     vertexData.applyToMesh(mesh); mesh.material = material(b.color, b.level); mesh.checkCollisions = b.collision && b.level === 0;
-    mesh.isPickable = mesh.checkCollisions; mesh.metadata = { worldId: mesh.name, kind: 'ground', procedural: true, detailLayer: b.layer, detailLevel: b.level, shadowCaster: b.layer === 'rail-structure' || ['#505b55', '#868b83'].includes(b.color) };
+    mesh.isPickable = mesh.checkCollisions; mesh.metadata = { worldId: mesh.name, kind: 'ground', procedural: true, surface: b.color, detailLayer: b.layer, detailLevel: b.level, shadowCaster: b.layer === 'rail-structure' || ['#505b55', '#868b83'].includes(b.color) };
     mesh.isVisible = b.level === 0;
     mesh.freezeWorldMatrix(); meshes.push(mesh);
     const lodKey = key.slice(0, key.lastIndexOf(','));

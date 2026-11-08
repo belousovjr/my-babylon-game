@@ -1,3 +1,5 @@
+import { MaterialFlags } from '@babylonjs/core/Materials/materialFlags.js';
+import { createPerformanceFlags, bindPerformanceControls } from './performanceControls';
 import { visualCandidates } from './sceneCandidates';
 import { createEditor } from './editor';
 import { RENDER_SETTINGS } from './renderSettings';
@@ -22,6 +24,7 @@ import { Beacons } from './beacons';
 import { mountUI, bindTimeControls, $, notify } from './ui';
 import './style.css';
 
+const performanceFlags = createPerformanceFlags();
 mountUI();
 const canvas = $<HTMLCanvasElement>('renderCanvas');
 const engine = new Engine(canvas, true, { stencil: true });
@@ -51,13 +54,14 @@ try {
 } catch { startupMessage = 'Сохранённая карта недоступна. Открыт Chicago Loop.'; }
 const city = new WorldRenderer(scene, cityMaterials, beacons, initialWorld);
 function updateLODs() {
+  if (!performanceFlags.lod && !city.initialLods) return;
   city.updateLODs(editor.editing ? scene.activeCamera!.position : player.position, predictedLodEye, editor.editing, editor.selected, editor.previewLod, lighting.night);
 }
 function updateActiveCell() {
   if (city.updateActiveCell(player.position, editor.editing)) { playerNeighborhood.invalidate(); cameraNeighborhood.invalidate(); }
 }
 function refreshNearbySources() {
-  const candidates = visualCandidates(scene.meshes);
+  const candidates = visualCandidates(scene.meshes, performanceFlags);
   scene.getActiveMeshCandidates = () => candidates;
   playerNeighborhood.setSources(scene.meshes.filter((mesh): mesh is Mesh => mesh instanceof Mesh && mesh.checkCollisions && (mesh.collisionGroup & player.collisionMask) !== 0 && !!mesh.metadata?.worldId));
   cameraNeighborhood.setSources([...city.meshes.values(), ...city.proceduralMeshes].filter(mesh => mesh.checkCollisions));
@@ -107,22 +111,41 @@ let accumulator = 0;
 let statsTime = 0;
 let lodTime = 0;
 const fadedLastFrame = new Set<Mesh>();
+bindPerformanceControls(performanceFlags, () => {
+  const candidates = visualCandidates(scene.meshes, performanceFlags);
+  scene.getActiveMeshCandidates = () => candidates;
+  scene.shadowsEnabled = lighting.shadowsEnabled = performanceFlags.shadows;
+  lighting.shadows.getShadowMap()!.resetRefreshCounter();
+  MaterialFlags.BumpTextureEnabled = performanceFlags.materials;
+  MaterialFlags.AmbientTextureEnabled = performanceFlags.materials;
+  MaterialFlags.SpecularTextureEnabled = performanceFlags.materials;
+  MaterialFlags.ReflectionTextureEnabled = performanceFlags.reflections;
+  scene.animationsEnabled = performanceFlags.animation;
+  lighting.localLightsEnabled = performanceFlags.localLights;
+  if (!performanceFlags.localLights) for (const light of lighting.streetLights) light.setEnabled(false);
+  lighting.setAtmosphereEnabled(performanceFlags.atmosphere);
+  document.body.classList.toggle('no-film', !performanceFlags.film);
+  if (!performanceFlags.camera) cameraBoom.reset();
+  if (!performanceFlags.lod) city.lodTransitions.settle();
+});
 engine.runRenderLoop(() => {
   if (document.hidden) { accumulator = 0; return; }
   const dt = Math.min(engine.getDeltaTime() / 1000, 0.1);
   if (!starting && !editor.editing && !document.hidden) {
     accumulator += dt;
-    while (accumulator >= 1 / 60) { simulate(1 / 60); accumulator -= 1 / 60; }
+    while (accumulator >= 1 / 60) { if (performanceFlags.physics) simulate(1 / 60); accumulator -= 1 / 60; }
     if (character.state.mode === 'fly') {
       Vector3.TransformCoordinatesToRef(flightCameraTarget, visual.computeWorldMatrix(true), camera.target);
     } else camera.target.copyFrom(player.position).addInPlaceFromFloats(0, 1.15, 0);
-    character.animate(dt);
+    if (performanceFlags.animation) character.animate(dt);
   } else { accumulator = 0; }
   if (!editor.editing) {
     // The orbit camera owns input/desired zoom; the render camera owns the collision-safe pose.
     camera.update();
-    cameraBoom.update(camera.target, camera.position, cameraNeighborhood.get(camera.target, Vector3.Distance(camera.target, camera.position) + 3), dt);
-    followCamera.position.copyFrom(cameraBoom.position);
+    if (performanceFlags.camera) {
+      cameraBoom.update(camera.target, camera.position, cameraNeighborhood.get(camera.target, Vector3.Distance(camera.target, camera.position) + 3), dt);
+      followCamera.position.copyFrom(cameraBoom.position);
+    } else followCamera.position.copyFrom(camera.position);
     followCamera.setTarget(camera.target);
   }
   const eye = editor.editing ? scene.activeCamera!.position : player.position;
@@ -139,9 +162,9 @@ engine.runRenderLoop(() => {
   for (const root of cameraBoom.fadedMeshes) {
     city.lodTransitions.opacity(root, root.visibility); fadedLastFrame.add(root);
   }
-  city.lodTransitions.update(dt);
+  if (performanceFlags.lod) city.lodTransitions.update(dt);
   cityMaterials.setNight(lighting.night);
-  beacons.update(dt);
+  if (performanceFlags.beacons) beacons.update(dt);
   lighting.update(eye, dt, starting || city.lodTransitions.busy || opacityChanged || fadedLastFrame.size > 0);
   scene.render();
   if (starting && characterReady && scene.isReady()) {

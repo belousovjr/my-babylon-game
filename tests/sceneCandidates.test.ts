@@ -18,3 +18,20 @@ test('draw candidates omit collision-only geometry but retain hidden LODs and co
   const added=MeshBuilder.CreateBox('new-model',{},scene);assert.ok(visualCandidates(scene.meshes).data.includes(added));
   scene.dispose();engine.dispose();
 });
+
+test('diagnostic category switches are independent and fully reversible',async()=>{
+  const {createPerformanceFlags}=await import('../src/performanceControls.ts');
+  const engine=new NullEngine(),scene=new Scene(engine),flags=createPerformanceFlags();
+  const city=MeshBuilder.CreateBox('city',{},scene);city.metadata={worldId:'building'};
+  const tree=MeshBuilder.CreateBox('tree',{},scene);tree.metadata={worldId:'tree',profile:'tree'};
+  const water=MeshBuilder.CreateBox('water',{},scene);water.metadata={procedural:true,surface:'#517d85'};
+  const beacon=MeshBuilder.CreateBox('beacon',{},scene);beacon.metadata={procedural:true,beacon:true};
+  const hero=MeshBuilder.CreateBox('hero',{},scene);
+  assert.equal(visualCandidates(scene.meshes,flags).length,5);
+  flags.city=false;assert.deepEqual(visualCandidates(scene.meshes,flags).data,[tree,water,beacon,hero]);
+  flags.trees=flags.water=flags.beacons=false;
+  assert.deepEqual(visualCandidates(scene.meshes,flags).data,[hero]);
+  assert.equal(visualCandidates(scene.meshes,createPerformanceFlags()).length,5);
+  assert.equal(scene.meshes.length,5,'diagnostic switches never destroy scene objects');
+  scene.dispose();engine.dispose();
+});

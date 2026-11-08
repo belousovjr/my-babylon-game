@@ -73,3 +73,7 @@ body::after {
   75% { transform: translate(-37px, -89px); }
 }
 @media (prefers-reduced-motion: reduce) { body::after { animation: none; } }
+
+body.no-film { filter: none; }
+body.no-film::after { display: none; }
+#performance-panel .check { margin: 8px 0; }

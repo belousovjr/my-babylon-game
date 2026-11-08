@@ -103,7 +103,7 @@ export class Beacons {
         beacon.scaling.set(0.9 / root.scaling.x, 0.9 / root.scaling.y, 0.9 / root.scaling.z);
         beacon.isPickable = false;
         beacon.checkCollisions = false;
-        beacon.metadata = { procedural: true, shadowCaster: false };
+        beacon.metadata = { procedural: true, shadowCaster: false, beacon: true };
       }
     }
   }

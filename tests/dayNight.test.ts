@@ -101,3 +101,20 @@ test('idle shadows stay cached and local lamps are disabled whenever they contri
     assert.ok(lighting.streetLights.every(light=>!light.isEnabled()),'unused night lights switch off');
   } finally {spy.mock.restore();scene.dispose();engine.dispose();}
 });
+
+test('diagnostic switches stop shadow selection, nearby lights and atmosphere, then restore them',()=>{
+  const engine=new NullEngine(),scene=new Scene(engine),lighting=new DayNight(scene);
+  const actor=MeshBuilder.CreateBox('actor',{},scene),lamp=MeshBuilder.CreateBox('lamp',{},scene);
+  lighting.setWorld([lamp],[actor]);lighting.update(Vector3.Zero(),1);
+  lighting.shadowsEnabled=false;lighting.update(Vector3.Zero(),1);
+  assert.equal(lighting.shadows.getShadowMap().renderList.length,0);
+  lighting.shadowsEnabled=true;lighting.update(Vector3.Zero(),1);
+  assert.ok(lighting.shadows.getShadowMap().renderList.includes(actor));
+  lighting.setTime(0);lighting.localLightsEnabled=false;lighting.update(Vector3.Zero(),1);
+  assert.ok(lighting.streetLights.every(light=>!light.isEnabled()));
+  lighting.localLightsEnabled=true;lighting.update(Vector3.Zero(),1);
+  assert.ok(lighting.streetLights.some(light=>light.isEnabled()));
+  lighting.setAtmosphereEnabled(false);assert.equal(scene.fogEnabled,false);assert.equal(scene.getMeshByName('sky-dome').isVisible,false);
+  lighting.setAtmosphereEnabled(true);assert.equal(scene.fogEnabled,true);assert.equal(scene.getMeshByName('sky-dome').isVisible,true);
+  scene.dispose();engine.dispose();
+});
