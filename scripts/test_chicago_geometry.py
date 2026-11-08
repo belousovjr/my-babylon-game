@@ -1,5 +1,4 @@
 """Run with python3 -m unittest discover -s scripts -p 'test_*.py'."""
-import importlib.util
 import math
 import unittest
 from pathlib import Path
@@ -7,31 +6,35 @@ from shapely.geometry import Polygon, LineString, Point, box
 from shapely.ops import unary_union
 from shapely import set_precision
 
-spec=importlib.util.spec_from_file_location('city',Path(__file__).with_name('build-chicago.py'))
-city=importlib.util.module_from_spec(spec)
-spec.loader.exec_module(city)
+from shapely.affinity import rotate, translate
+from shapely.prepared import prep
+from shapely.strtree import STRtree
+from chicago_geometry import rings, snap_outline, triangles
+from chicago_roads import clean_roads, street_surfaces, street_lamps, road_arms, traffic_signals, pedestrian_crossings
+from chicago_railway import elevated_metro, railway_geometry, railway_bridge_trusses, railway_support_candidates, place_railway_supports
+from chicago_buildings import building_footprint, fit_building, fit_landmark_group, unsupported_elevated_building
 
 class StreetGeometryTests(unittest.TestCase):
     def test_concave_sidewalk_and_hole_have_no_missing_triangles(self):
         shapes=[Polygon([(0,0),(9,0),(9,9),(6,9),(6,2),(3,2),(3,9),(0,9)]),
                 Polygon([(0,0),(20,0),(20,20),(0,20)],holes=[[(2,3),(16,4),(12,17),(4,12)]])]
         for shape in shapes:
-            result=unary_union([Polygon(t) for t in city.triangles(shape)])
+            result=unary_union([Polygon(t) for t in triangles(shape)])
             self.assertLess(shape.symmetric_difference(result).area,1e-6)
 
     def test_curb_follows_both_sides_of_closed_block_without_gaps(self):
         road=LineString([(0,0),(30,0),(30,30),(0,30),(0,0)]).buffer(3,join_style=2)
         curb=road.buffer(.22,join_style=2).difference(road)
-        self.assertEqual(len(city.rings(road)),2)
-        self.assertEqual(len(city.rings(curb)),4)
-        result=unary_union([Polygon(t) for t in city.triangles(curb)])
+        self.assertEqual(len(rings(road)),2)
+        self.assertEqual(len(rings(curb)),4)
+        result=unary_union([Polygon(t) for t in triangles(curb)])
         self.assertLess(curb.symmetric_difference(result).area,1e-6)
         self.assertLess(result.intersection(road).area,1e-6)
-        self.assertTrue(all(r[0]==r[-1] for r in city.rings(curb)))
+        self.assertTrue(all(r[0]==r[-1] for r in rings(curb)))
 
     def test_triangulation_preserves_shared_boundary_vertices(self):
         shape=Polygon([(0,0),(100,0),(100,20),(0.00001,20),(0,19.99999)])
-        result=unary_union([Polygon(t) for t in city.triangles(shape)])
+        result=unary_union([Polygon(t) for t in triangles(shape)])
         self.assertLess(shape.symmetric_difference(result).area,1e-9)
 
     def test_generated_ground_does_not_overlap_paving(self):
@@ -44,7 +47,7 @@ class StreetGeometryTests(unittest.TestCase):
     def test_sidewalk_uses_one_contour_at_unequal_width_junction(self):
         roads=[dict(points=[[-30,0],[0,0],[30,0]],width=14),
                dict(points=[[0,0],[2,30]],width=8)]
-        asphalt,sidewalk,pavement=city.street_surfaces(roads,box(-40,-40,40,40))
+        asphalt,sidewalk,pavement=street_surfaces(roads,box(-40,-40,40,40))
         self.assertTrue(asphalt.is_valid and sidewalk.is_valid)
         self.assertLess(asphalt.intersection(sidewalk).area,1e-6)
         self.assertLess(pavement.symmetric_difference(asphalt.union(sidewalk)).area,1e-6)
@@ -54,7 +57,7 @@ class StreetGeometryTests(unittest.TestCase):
     def test_narrow_ground_spike_is_absorbed_into_intersection(self):
         roads=[dict(points=[[-20,0],[20,0]],width=10),
                dict(points=[[0,0],[20,1]],width=8)]
-        asphalt,sidewalk,_=city.street_surfaces(roads,box(-30,-30,30,30))
+        asphalt,sidewalk,_=street_surfaces(roads,box(-30,-30,30,30))
         self.assertTrue(asphalt.is_valid and sidewalk.is_valid)
         self.assertTrue(asphalt.covers(Polygon([(0,4),(10,4),(10,4.4)])))
 
@@ -69,12 +72,12 @@ class StreetGeometryTests(unittest.TestCase):
             self.assertTrue(ground.covers(point),'small plaza pools must leave the ground intact')
 
     def test_untyped_elevated_structures_do_not_become_estimated_towers(self):
-        self.assertTrue(city.unsupported_elevated_building(dict(building='yes',layer='3')))
+        self.assertTrue(unsupported_elevated_building(dict(building='yes',layer='3')))
         for tags in [dict(building='yes'),dict(building='office',layer='1'),
                      dict(building='yes',layer='3',height='20'),
                      dict(building='yes',layer='3',name='Named building'),
                      {'building':'yes','layer':'3','building:levels':'4'}]:
-            self.assertFalse(city.unsupported_elevated_building(tags))
+            self.assertFalse(unsupported_elevated_building(tags))
         import json
         objects=json.loads((Path(__file__).resolve().parents[1]/'src/generated/chicago.json').read_text())['world']['objects']
         self.assertFalse({'osm-w1175853280','osm-w1175853281'} & {o['id'] for o in objects})
@@ -123,15 +126,15 @@ class StreetGeometryTests(unittest.TestCase):
 
     def test_metro_classification_excludes_mainline_rail_and_tunnels(self):
         tags=dict(railway='subway',operator='Chicago Transit Authority',layer='2',bridge='yes')
-        self.assertTrue(city.elevated_metro(tags))
-        self.assertFalse(city.elevated_metro(dict(tags,tunnel='yes')))
-        self.assertFalse(city.elevated_metro(dict(tags,service='siding')))
-        self.assertFalse(city.elevated_metro(dict(railway='rail',operator='Union Pacific Railroad',layer='1')))
+        self.assertTrue(elevated_metro(tags))
+        self.assertFalse(elevated_metro(dict(tags,tunnel='yes')))
+        self.assertFalse(elevated_metro(dict(tags,service='siding')))
+        self.assertFalse(elevated_metro(dict(railway='rail',operator='Union Pacific Railroad',layer='1')))
 
     def test_metro_deck_joins_short_fragments_parallel_tracks_and_corners(self):
         lines=[LineString([(0,0),(1,0)]),LineString([(1,0),(30,0),(30,30)]),
                LineString([(0,3),(27,3),(27,30)])]
-        result=city.railway_geometry(lines,box(-5,-5,35,35),Polygon())
+        result=railway_geometry(lines,box(-5,-5,35,35),Polygon())
         deck=unary_union([Polygon(t) for t in result['deck']])
         self.assertEqual(deck.geom_type,'Polygon','shared platform instead of separate track boxes')
         for line in lines:self.assertTrue(deck.buffer(1e-6).covers(line))
@@ -153,7 +156,7 @@ class StreetGeometryTests(unittest.TestCase):
     def test_building_fit_preserves_grid_and_leaves_track_corridor_clear(self):
         corridor=box(4,-30,8,30)
         o=dict(position=[0,10,0],size=[20,20,20],yaw=0)
-        result=city.fit_building(o,box(-30,-30,30,30).difference(corridor))
+        result=fit_building(o,box(-30,-30,30,30).difference(corridor))
         self.assertIsNotNone(result)
         w,h,d=result['size'];x,y,z=result['position']
         self.assertLess(box(x-w/2,z-d/2,x+w/2,z+d/2).intersection(corridor).area,1e-6)
@@ -168,7 +171,7 @@ class StreetGeometryTests(unittest.TestCase):
         ground=unary_union([Polygon(t) for cell in env['terrain'] for t in cell['triangles']])
         pavement=unary_union([Polygon(t) for key in ['roadSurface','sidewalks','curbs'] for t in env[key]])
         for o in data['world']['objects']:
-            footprint=city.building_footprint(o)
+            footprint=building_footprint(o)
             self.assertLess(footprint.difference(ground).area,1e-6,o['id']+' lacks ground support')
             self.assertLess(footprint.intersection(pavement).area,1e-6,o['id']+' overlaps street paving')
             self.assertEqual(o['position'][1]-o['size'][1]/2,0)
@@ -176,26 +179,26 @@ class StreetGeometryTests(unittest.TestCase):
     def test_buildings_fit_shoreline_steps_without_overhanging(self):
         land=box(-30,-30,4,30)
         o=dict(position=[0,10,0],size=[20,20,20],yaw=0)
-        fitted=city.fit_building(o,land)
+        fitted=fit_building(o,land)
         self.assertIsNotNone(fitted)
-        self.assertTrue(land.covers(city.building_footprint(fitted)))
+        self.assertTrue(land.covers(building_footprint(fitted)))
         self.assertLess(fitted['size'][0]*fitted['size'][2],400)
-        self.assertIsNone(city.fit_building(o,box(-1,-1,1,1)))
+        self.assertIsNone(fit_building(o,box(-1,-1,1,1)))
 
     def test_landmark_ensemble_keeps_identical_size_and_relative_layout(self):
         objects=[dict(id='a',position=[0,20,0],size=[20,40,20],yaw=.3),
                  dict(id='b',position=[30,20,0],size=[20.25,40,19.75],yaw=1.2)]
         land=box(-100,20,100,100)
-        fitted=city.fit_landmark_group(objects,land,identical=True)
+        fitted=fit_landmark_group(objects,land,identical=True)
         self.assertEqual(fitted[0]['size'],fitted[1]['size'])
         self.assertEqual(fitted[0]['yaw'],fitted[1]['yaw'])
         self.assertEqual(fitted[1]['position'][0]-fitted[0]['position'][0],30)
         self.assertEqual(fitted[1]['position'][2]-fitted[0]['position'][2],0)
         for original,o in zip(objects,fitted):
-            self.assertTrue(land.covers(city.building_footprint(o)))
+            self.assertTrue(land.covers(building_footprint(o)))
             self.assertLessEqual(abs(original['position'][2]-o['position'][2]),32)
         with self.assertRaises(RuntimeError):
-            city.fit_landmark_group(objects,box(-1,-1,1,1),identical=True)
+            fit_landmark_group(objects,box(-1,-1,1,1),identical=True)
 
     def test_landmarks_survive_and_marina_pair_is_identical(self):
         import json
@@ -210,15 +213,15 @@ class StreetGeometryTests(unittest.TestCase):
         self.assertEqual(twins[0]['position'][1],twins[1]['position'][1])
         for a in objects:
             if a['id'] not in data['report']['protectedBuildings']:continue
-            footprint=city.building_footprint(a)
+            footprint=building_footprint(a)
             for b in objects:
                 if a['id']!=b['id']:
-                    self.assertLess(footprint.intersection(city.building_footprint(b)).area,1e-6,a['id']+' overlaps '+b['id'])
+                    self.assertLess(footprint.intersection(building_footprint(b)).area,1e-6,a['id']+' overlaps '+b['id'])
 
     def test_short_missing_connection_is_joined_but_remote_stubs_are_removed(self):
         roads=[dict(points=[[-100,0],[100,0]],width=9),dict(points=[[0,8],[0,80]],width=9),
                dict(points=[[200,0],[220,0]],width=9)]
-        cleaned=city.clean_roads(roads,box(-100,-100,300,100))
+        cleaned=clean_roads(roads,box(-100,-100,300,100))
         network=unary_union([LineString(r['points']) for r in cleaned])
         self.assertLess(network.distance(Point(0,4)),1e-6)
         self.assertGreater(network.distance(Point(210,0)),100)
@@ -226,7 +229,7 @@ class StreetGeometryTests(unittest.TestCase):
     def test_tiny_traffic_islands_and_isolated_asphalt_are_removed(self):
         roads=[dict(points=[[0,0],[30,0],[30,30],[0,30],[0,0]],width=24),
                dict(points=[[100,0],[110,0]],width=5)]
-        asphalt,_,_=city.street_surfaces(roads,box(-50,-50,150,100))
+        asphalt,_,_=street_surfaces(roads,box(-50,-50,150,100))
         self.assertEqual(asphalt.geom_type,'Polygon')
         self.assertEqual(len(asphalt.interiors),0)
         self.assertFalse(asphalt.covers(Point(105,0)))
@@ -240,14 +243,14 @@ class StreetGeometryTests(unittest.TestCase):
         self.assertTrue(all(Polygon(r).area>=64-1e-6 for r in asphalt.interiors))
         parts=list(sidewalks.geoms) if hasattr(sidewalks,'geoms') else [sidewalks]
         self.assertTrue(all(p.area>=64-1e-6 for p in parts))
-        coverage=city.prep(asphalt.buffer(.05))
+        coverage=prep(asphalt.buffer(.05))
         for road in env['roads']:
             self.assertTrue(coverage.covers(LineString(road['points'])))
 
     def test_short_internal_dead_end_is_pruned_without_removing_longer_streets(self):
         roads=[dict(points=[[-100,0],[100,0]],width=9),dict(points=[[0,0],[0,10]],width=9),
                dict(points=[[0,10],[0,20]],width=9)]
-        cleaned=city.clean_roads(roads,box(-100,-100,100,100))
+        cleaned=clean_roads(roads,box(-100,-100,100,100))
         network=unary_union([LineString(r['points']) for r in cleaned])
         self.assertGreater(network.distance(Point(0,15)),10)
         self.assertLess(network.distance(Point(40,0)),1e-6)
@@ -255,7 +258,7 @@ class StreetGeometryTests(unittest.TestCase):
     def test_short_return_loop_is_removed_without_breaking_main_street(self):
         roads=[dict(points=[[0,-100],[0,100]],width=9),
                dict(points=[[0,0],[-10,0],[-10,2],[0,2]],width=9)]
-        cleaned=city.clean_roads(roads,box(-100,-100,100,100))
+        cleaned=clean_roads(roads,box(-100,-100,100,100))
         network=unary_union([LineString(r['points']) for r in cleaned])
         self.assertGreater(network.distance(Point(-10,1)),9)
         self.assertLess(network.distance(Point(0,1)),1e-6)
@@ -263,7 +266,7 @@ class StreetGeometryTests(unittest.TestCase):
     def test_supports_use_sidewalk_corners_instead_of_intersection_lanes(self):
         asphalt=unary_union([box(-5,-50,5,50),box(-50,-5,50,5)])
         sidewalks=asphalt.buffer(3.2).difference(asphalt)
-        supports=city.place_railway_supports([[0,0],[-3,20]],sidewalks,asphalt,Polygon(),box(-3,-50,3,50),Polygon())
+        supports=place_railway_supports([[0,0],[-3,20]],sidewalks,asphalt,Polygon(),box(-3,-50,3,50),Polygon())
         self.assertEqual(len(supports),2)
         for support in supports:
             x,y,z=support['position']
@@ -286,10 +289,10 @@ class StreetGeometryTests(unittest.TestCase):
             x,base,z=support['position'];point=Point(x,z)
             peer=supports[i^1]['position']
             angle=math.atan2(peer[2]-z,peer[0]-x)
-            foot=city.translate(city.rotate(box(-.325,-.325,.325,.325),angle,origin=(0,0),use_radians=True),x,z)
+            foot=translate(rotate(box(-.325,-.325,.325,.325),angle,origin=(0,0),use_radians=True),x,z)
             self.assertTrue((sidewalk if base==.16 else ground).covers(foot))
             self.assertLess(foot.intersection(asphalt).area,1e-6)
-            column=city.translate(city.rotate(box(-.175,-.175,.175,.175),angle,origin=(0,0),use_radians=True),x,z)
+            column=translate(rotate(box(-.175,-.175,.175,.175),angle,origin=(0,0),use_radians=True),x,z)
             self.assertGreaterEqual(column.distance(deck),.3-1e-6)
             self.assertIn(base,[0,.16])
             self.assertGreaterEqual(support['top'],6)
@@ -300,7 +303,7 @@ class StreetGeometryTests(unittest.TestCase):
         asphalt=box(-5,-50,5,50)
         sidewalks=asphalt.buffer(3.2).difference(asphalt)
         deck=box(-3,-50,3,50)
-        self.assertEqual(city.place_railway_supports([[-3,20]],sidewalks.intersection(box(-50,-50,0,50)),asphalt,Polygon(),deck,Polygon()),[])
+        self.assertEqual(place_railway_supports([[-3,20]],sidewalks.intersection(box(-50,-50,0,50)),asphalt,Polygon(),deck,Polygon()),[])
 
     def test_generated_support_pairs_are_aligned_across_the_deck(self):
         import json, math
@@ -325,10 +328,10 @@ class StreetGeometryTests(unittest.TestCase):
         asphalt=centre.buffer(5,cap_style=2,join_style=3)
         sidewalks=asphalt.buffer(3.2).difference(asphalt)
         points=[]
-        for ring in city.rings(deck):
+        for ring in rings(deck):
             edge=LineString(ring)
             points.extend(list(edge.interpolate(d).coords)[0] for d in range(4,int(edge.length),4))
-        supports=city.place_railway_supports(points,sidewalks,asphalt,Polygon(),deck,Polygon())
+        supports=place_railway_supports(points,sidewalks,asphalt,Polygon(),deck,Polygon())
         centres=unary_union([Point((a['position'][0]+b['position'][0])/2,(a['position'][2]+b['position'][2])/2) for a,b in zip(supports[::2],supports[1::2])])
         for distance in range(8,int(centre.length)-8,4):
             self.assertLess(centre.interpolate(distance).distance(centres),30)
@@ -347,7 +350,7 @@ class StreetGeometryTests(unittest.TestCase):
         for ring in env['railway']['edges']:
             edge=LineString(ring)
             points.extend(edge.interpolate(distance).coords[0] for distance in range(0,int(edge.length),8))
-        for pair in city.railway_support_candidates(points,sidewalk,asphalt,water,deck,ground):
+        for pair in railway_support_candidates(points,sidewalk,asphalt,water,deck,ground):
             a,b=pair[0]['position'],pair[1]['position']
             point=Point((a[0]+b[0])/2,(a[2]+b[2])/2)
             self.assertLess(point.distance(centres),32,f'missing feasible frame near {point.x}, {point.y}')
@@ -377,7 +380,7 @@ class StreetGeometryTests(unittest.TestCase):
         water=Polygon([(-35,-20),(25,-20),(35,20),(-25,20)])
         banks=Polygon([(-100,-100),(100,-100),(100,100),(-100,100)]).difference(water.buffer(7,join_style=3))
         deck=LineString([(-90,0),(90,0)]).buffer(5,cap_style=2)
-        trusses=city.railway_bridge_trusses(deck,Polygon(),water,banks)
+        trusses=railway_bridge_trusses(deck,Polygon(),water,banks)
         self.assertEqual(len(trusses),1)
         self.assertTrue(trusses[0]['bankSupported'])
         for side in trusses[0]['sides']:
@@ -387,7 +390,7 @@ class StreetGeometryTests(unittest.TestCase):
         import json
         env=json.loads((Path(__file__).resolve().parents[1]/'src/generated/chicago.json').read_text())['environment']
         water=unary_union([Polygon(t) for t in env['water']])
-        lowered_banks=city.snap_outline(water.buffer(7,join_style=3))
+        lowered_banks=snap_outline(water.buffer(7,join_style=3))
         standalone=[t for t in env['railway']['bridgeTrusses'] if t['bankSupported']]
         self.assertTrue(standalone)
         for truss in standalone:
@@ -400,7 +403,7 @@ class StreetGeometryTests(unittest.TestCase):
         asphalt=box(-5.5,-50,5.5,50)
         sidewalk=asphalt.buffer(3.2).difference(asphalt)
         for origin in [[-5,0],[-1,0],[1,0],[5,0]]:
-            supports=city.place_railway_supports([origin],sidewalk,asphalt,Polygon(),deck,Polygon())
+            supports=place_railway_supports([origin],sidewalk,asphalt,Polygon(),deck,Polygon())
             self.assertEqual(len(supports),2)
             attachments=sorted(s['attachment'][0] for s in supports)
             self.assertAlmostEqual(attachments[0],-5)
@@ -411,16 +414,16 @@ class StreetGeometryTests(unittest.TestCase):
     def test_distant_parallel_tracks_keep_separate_frames(self):
         deck=box(-10,-50,-6,50).union(box(6,-50,10,50))
         ground=box(-30,-60,30,60)
-        supports=city.place_railway_supports([[-10,0]],Polygon(),Polygon(),Polygon(),deck,ground)
+        supports=place_railway_supports([[-10,0]],Polygon(),Polygon(),Polygon(),deck,ground)
         self.assertEqual(len(supports),2)
         self.assertLess(max(s['attachment'][0] for s in supports),0)
 
     def test_support_columns_keep_clearance_on_both_sides_of_curved_deck(self):
         centre=LineString([(0,-50),(0,0),(15,30),(50,40)])
         deck=centre.buffer(2.1,cap_style=2,join_style=2)
-        points=[list(LineString(ring).interpolate(d).coords)[0] for ring in city.rings(deck) for d in range(4,int(LineString(ring).length),4)]
+        points=[list(LineString(ring).interpolate(d).coords)[0] for ring in rings(deck) for d in range(4,int(LineString(ring).length),4)]
         ground=box(-100,-100,100,100)
-        supports=city.place_railway_supports(points,Polygon(),Polygon(),Polygon(),deck,ground)
+        supports=place_railway_supports(points,Polygon(),Polygon(),Polygon(),deck,ground)
         self.assertGreater(len(supports),4)
         for support in supports:
             x,_,z=support['position']
@@ -443,7 +446,7 @@ class StreetGeometryTests(unittest.TestCase):
 
     def test_lamps_skip_roads_without_sidewalk_space(self):
         roads=[dict(bridge=False,width=10,points=[[0,0],[100,0]])]
-        self.assertEqual(city.street_lamps(roads,Polygon(),box(0,-5,100,5)),[])
+        self.assertEqual(street_lamps(roads,Polygon(),box(0,-5,100,5)),[])
 
 
     def test_two_signals_at_major_crossings_and_none_at_simple_junctions(self):
@@ -452,7 +455,7 @@ class StreetGeometryTests(unittest.TestCase):
             dict(points=[[0,-60],[0,60]],width=10,highway='secondary',oneway='yes')]
         asphalt=unary_union([LineString(r['points']).buffer(5,cap_style=2) for r in cross])
         sidewalk=asphalt.buffer(3.2).difference(asphalt)
-        signals=city.traffic_signals(cross,sidewalk,asphalt)
+        signals=traffic_signals(cross,sidewalk,asphalt)
         self.assertEqual(len(signals),2)
         directions={}
         for signal in signals:
@@ -461,11 +464,11 @@ class StreetGeometryTests(unittest.TestCase):
             self.assertLess(x*ux+z*uz,-5)
             directions.setdefault(tuple(signal['approach']),[]).append(signal)
         self.assertEqual(len(directions),2)
-        self.assertEqual(city.traffic_signals(cross[:1],sidewalk,asphalt),[],'no signals on a straight street')
+        self.assertEqual(traffic_signals(cross[:1],sidewalk,asphalt),[],'no signals on a straight street')
         tee=[cross[0],dict(cross[1],points=[[0,0],[0,60]])]
-        self.assertEqual(city.traffic_signals(tee,sidewalk,asphalt),[],'simple T junctions stay clear')
+        self.assertEqual(traffic_signals(tee,sidewalk,asphalt),[],'simple T junctions stay clear')
         minor=[dict(r,highway='residential') for r in cross]
-        self.assertEqual(city.traffic_signals(minor,sidewalk,asphalt),[],'minor crossings stay clear')
+        self.assertEqual(traffic_signals(minor,sidewalk,asphalt),[],'minor crossings stay clear')
 
     def test_all_generated_signals_are_safe_paired_and_face_incoming_traffic(self):
         import json
@@ -517,7 +520,7 @@ class StreetGeometryTests(unittest.TestCase):
                 self.assertGreaterEqual(stop.distance(paint),1.3-1e-6)
                 sx,sz=crossing['stopCentre']
                 self.assertAlmostEqual((sx-cx)*ux+(sz-cz)*uz,crossing['depth']/2+1.5)
-        self.assertEqual(city.pedestrian_crossings([],env['roads'],sidewalk,asphalt),[])
+        self.assertEqual(pedestrian_crossings([],env['roads'],sidewalk,asphalt),[])
 
 
     def test_junction_layout_has_perimeter_crosswalks_and_stop_bars_only_on_incoming_sides(self):
@@ -525,8 +528,8 @@ class StreetGeometryTests(unittest.TestCase):
                dict(points=[[0,-60],[0,60]],width=10,highway='secondary',oneway='yes')]
         asphalt=unary_union([LineString(r['points']).buffer(5,cap_style=2) for r in roads])
         sidewalk=asphalt.buffer(3.2).difference(asphalt)
-        signals=city.traffic_signals(roads,sidewalk,asphalt)
-        crossings=city.pedestrian_crossings(signals,roads,sidewalk,asphalt)
+        signals=traffic_signals(roads,sidewalk,asphalt)
+        crossings=pedestrian_crossings(signals,roads,sidewalk,asphalt)
         self.assertEqual(len(signals),2)
         self.assertEqual(len(crossings),4)
         self.assertEqual(sum(bool(c['stopLine']) for c in crossings),2)
@@ -535,7 +538,7 @@ class StreetGeometryTests(unittest.TestCase):
             self.assertGreaterEqual(cx*ux+cz*uz,7.5)
             self.assertEqual(bool(crossing['stopLine']),ux<-.99 or uz<-.99)
         for road in roads:road['oneway']='no'
-        crossings=city.pedestrian_crossings(signals,roads,sidewalk,asphalt)
+        crossings=pedestrian_crossings(signals,roads,sidewalk,asphalt)
         self.assertTrue(all(c['stopLine'] for c in crossings))
         for crossing in crossings:
             cx,cz=crossing['centre'];sx,sz=crossing['stopCentre'];ux,uz=crossing['direction']
@@ -548,8 +551,8 @@ class StreetGeometryTests(unittest.TestCase):
                       dict(points=[[0,12],[0,60]],width=10,highway='tertiary',oneway='no')])
         asphalt=unary_union([LineString(r['points']).buffer(5,cap_style=2) for r in roads])
         sidewalk=asphalt.buffer(3.2).difference(asphalt)
-        signals=city.traffic_signals(roads,sidewalk,asphalt)
-        crossings=city.pedestrian_crossings(signals,roads,sidewalk,asphalt)
+        signals=traffic_signals(roads,sidewalk,asphalt)
+        crossings=pedestrian_crossings(signals,roads,sidewalk,asphalt)
         self.assertEqual(len({tuple(s['junction']) for s in signals}),2)
         self.assertEqual(len(crossings),6,'outer perimeter crosses each carriageway, without crossings across the median link')
         for z in [-12,12]:
@@ -560,12 +563,12 @@ class StreetGeometryTests(unittest.TestCase):
         import json
         env=json.loads((Path(__file__).resolve().parents[1]/'src/generated/chicago.json').read_text())['environment']
         roads=[r for r in env['roads'] if r['highway'] in ['primary','secondary','trunk','tertiary']]
-        lines=[LineString(r['points']) for r in roads];tree=city.STRtree(lines)
+        lines=[LineString(r['points']) for r in roads];tree=STRtree(lines)
         junctions={tuple(s['junction']) for s in env['trafficSignals']}
         self.assertTrue(any(len(s['headings'])>1 for s in env['trafficSignals']))
         for junction in junctions:
             signals=[s for s in env['trafficSignals'] if tuple(s['junction'])==junction]
-            for arm in city.road_arms(Point(junction),roads,lines,tree):
+            for arm in road_arms(Point(junction),roads,lines,tree):
                 if not arm['incoming']:continue
                 ux,uz=arm['direction']
                 self.assertTrue(any(math.sin(s['yaw']+angle)*ux+math.cos(s['yaw']+angle)*uz>.98 for s in signals for angle in s['headings']),f'no head facing incoming arm at {junction}')

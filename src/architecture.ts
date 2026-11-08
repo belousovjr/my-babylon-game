@@ -5,8 +5,9 @@ import type { Material } from '@babylonjs/core/Materials/material.js';
 import type { ObjectTemplate } from './world';
 import facadeLayout from './facadeLayout.json' with { type: 'json' };
 
-export const PROFILES = ['box', 'glass', 'stone', 'deco', 'bundled', 'rounded', 'marina', 'gothic', 'clock', 'tree', 'lamp', 'traffic_signal'] as const;
-export type Profile = typeof PROFILES[number];
+import type { Profile } from './profiles.ts';
+export { PROFILES } from './profiles.ts';
+export type { Profile } from './profiles.ts';
 
 export function spireTips(profile?: Profile): [number, number, number][] {
   if (profile === 'bundled') return [[0, 0.5, 0], [0.2, 0.5, 0]];

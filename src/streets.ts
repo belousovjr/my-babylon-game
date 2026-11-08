@@ -1,3 +1,4 @@
+import { RENDER_SETTINGS } from './renderSettings.ts';
 import { Ray } from '@babylonjs/core/Culling/ray.js';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
 import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
@@ -30,7 +31,7 @@ export function updateStreetDetailLODs(meshes: Mesh[], eye: Vector3, transition?
     } else {
       const bounds = mesh.metadata.lodBounds ?? mesh.getBoundingInfo().boundingBox;
       const distance = lodDistance(eye, predictedEye, bounds);
-      const near = layer === 'marking' ? 60 : 100, far = layer === 'marking' ? 160 : 320;
+      const [near, far] = layer === 'marking' ? RENDER_SETTINGS.streetLod.marking : RENDER_SETTINGS.streetLod.structure;
       mesh.isVisible = distance < far && (mesh.metadata.detailLevel === 0 ? distance < near : distance >= near);
     }
   }
@@ -38,8 +39,8 @@ export function updateStreetDetailLODs(meshes: Mesh[], eye: Vector3, transition?
     const first = levels[0] ?? levels[1]!;
     const bounds = first.metadata.lodBounds ?? first.getBoundingInfo().boundingBox;
     const distance = lodDistance(eye, predictedEye, bounds);
-    const marking = first.metadata.detailLayer === 'marking';
-    const target = distance >= (marking ? 160 : 320) ? -1 : distance < (marking ? 60 : 100) ? 0 : 1;
+    const [near, far] = first.metadata.detailLayer === 'marking' ? RENDER_SETTINGS.streetLod.marking : RENDER_SETTINGS.streetLod.structure;
+    const target = distance >= far ? -1 : distance < near ? 0 : 1;
     const present = levels.filter(Boolean);
     transition!(first, present, present.findIndex(mesh => mesh.metadata.detailLevel === target));
   }

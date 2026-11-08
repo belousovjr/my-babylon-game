@@ -28,3 +28,7 @@ data/chicago/*.xml
 data/chicago/map.osm
 data/chicago/osm.json
 data/chicago/buildings.geojson
+
+# Offline generator bytecode
+__pycache__/
+*.pyc

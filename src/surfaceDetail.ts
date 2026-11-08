@@ -1,3 +1,4 @@
+import { RENDER_SETTINGS } from './renderSettings.ts';
 import { MaterialPluginBase } from '@babylonjs/core/Materials/materialPluginBase.js';
 import type { Material } from '@babylonjs/core/Materials/material.js';
 import type { UniformBuffer } from '@babylonjs/core/Materials/uniformBuffer.js';
@@ -22,7 +23,7 @@ export class SurfaceDetail extends MaterialPluginBase {
     if (shaderType !== 'fragment') return null;
     return {
       CUSTOM_FRAGMENT_BEFORE_LIGHTS: `
-        float surfaceDetailFade = smoothstep(16., 96., length(vPositionW - vEyePosition.xyz));
+        float surfaceDetailFade = smoothstep(${RENDER_SETTINGS.surfaceFade[0].toFixed(1)}, ${RENDER_SETTINGS.surfaceFade[1].toFixed(1)}, length(vPositionW - vEyePosition.xyz));
         vec3 surfaceAverage = surfaceMean.rgb;
         #if defined(VERTEXCOLOR) || defined(INSTANCESCOLOR) && defined(INSTANCES)
           surfaceAverage *= vColor.rgb;

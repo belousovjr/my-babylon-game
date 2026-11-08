@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "node --test tests/*.test.ts",
+    "test:geometry": "python3 -m unittest discover -s scripts -p 'test_*.py'",
     "city:build": "python3 scripts/build-chicago.py",
     "city:fetch": "python3 scripts/fetch-chicago.py",
     "textures:build": "python3 scripts/build-textures.py"

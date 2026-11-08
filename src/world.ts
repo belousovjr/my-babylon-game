@@ -1,6 +1,8 @@
 import chicago from './generated/chicago.json' with { type: 'json' };
-import { PROFILES } from './architecture.ts';
-import type { Profile } from './architecture.ts';
+import { PROFILES } from './profiles.ts';
+import type { Profile } from './profiles.ts';
+export const WORLD_STORAGE_KEY = 'block-district-chicago-v3';
+
 export type Kind = 'building' | 'ground' | 'obstacle';
 export type Triple = [number, number, number];
 export interface ObjectTemplate {
