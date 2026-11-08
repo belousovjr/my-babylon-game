@@ -179,3 +179,31 @@ test('bundled tower maps complete glass windows onto all nine stepped volumes at
     levels.forEach(m => m.dispose());
   } finally { spy.mock.restore(); scene.dispose(); engine.dispose(); }
 });
+
+test('Marina concrete cylinders unwrap continuously and ground floor starts at a whole row', () => {
+  const engine = new NullEngine(), scene = new Scene(engine);
+  const body = new StandardMaterial('windows', scene), concrete = new StandardMaterial('concrete', scene), base = new StandardMaterial('base', scene), roof = new StandardMaterial('roof', scene);
+  const original = Mesh.MergeMeshes;
+  let checked = 0;
+  const spy = mock.method(Mesh, 'MergeMeshes', (...args: Parameters<typeof Mesh.MergeMeshes>) => {
+    const parts = args[0], core = parts.find(m => m.material === body)!;
+    assert.ok(Math.abs(core.position.y - core.scaling.y / 2 - layout.marina.bottom) < 1e-6);
+    const plinth = parts.find(m => m.material === base)!;
+    assert.ok(Math.abs(plinth.position.y + plinth.scaling.y / 2 - layout.marina.bottom) < 1e-6);
+    for (const mesh of parts.filter(m => m.material === concrete)) {
+      const uv = mesh.getVerticesData('uv')!, normals = mesh.getVerticesData('normal')!, positions = mesh.getVerticesData('position')!;
+      const bottom = [];
+      for (let i = 0; i < positions.length; i += 3) if (Math.abs(normals[i + 1]!) < .1 && positions[i + 1]! < 0) bottom.push(uv[i / 3 * 2]!);
+      const steps = bottom.slice(1).map((u,i) => u - bottom[i]!);
+      assert.ok(steps.length >= 6);
+      for (const step of steps) assert.ok(Math.abs(step - steps[0]!) < 1e-5, 'no projection switch or stretched cylinder face');
+    }
+    checked++;
+    return original(...args);
+  });
+  try {
+    buildArchitecture({id:'marina',name:'Marina',profile:'marina',kind:'building',size:[38,179,38],color:'#ffffff',lodDistances:[180,650]},scene,body,concrete,[0],
+      (_lod,accent,_light,role)=>role==='base'?base:role==='roof'?roof:accent?concrete:body).forEach(m=>m.dispose());
+    assert.equal(checked,3);
+  } finally { spy.mock.restore(); scene.dispose(); engine.dispose(); }
+});
