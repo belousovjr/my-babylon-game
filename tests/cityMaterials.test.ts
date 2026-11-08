@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { NullEngine } from '@babylonjs/core/Engines/nullEngine.js';
 import { Scene } from '@babylonjs/core/scene.js';
-import { CityMaterials, buildingSurface, streetSurface } from '../src/cityMaterials.ts';
+import { CityMaterials, buildingSurface, streetSurface, facadeVariant } from '../src/cityMaterials.ts';
 import { buildArchitecture } from '../src/architecture.ts';
 import { createWorld } from '../src/world.ts';
 
@@ -13,7 +13,7 @@ test('city materials share textures, simplify distant shaders, and keep lights a
   const world = createWorld();
   for (const template of world.templates) {
     const levels = buildArchitecture(template, scene, materials.get(template.color), materials.get(template.color), [0, Math.PI / 2],
-      (lod, accent, luminous) => materials.get(luminous ? '#ffffff' : template.color, buildingSurface(template, accent, luminous), lod, accent || luminous ? 1 : 0));
+      (lod, accent, luminous, role) => materials.get(luminous ? '#ffffff' : template.color, buildingSurface(template, accent, luminous, role), lod, accent || luminous ? 1 : 0));
     levels.forEach((mesh, lod) => {
       const uv = mesh.getVerticesData('uv');
       assert.equal(uv.length, mesh.getTotalVertices() * 2);
@@ -30,10 +30,13 @@ test('city materials share textures, simplify distant shaders, and keep lights a
       if (template.kind === 'building') assert.ok(parts.every(material => material.diffuseTexture), 'all architectural surfaces are textured');
     });
     if (['glass', 'stone'].includes(template.profile)) {
-      assert.ok(levels.every(mesh => mesh.subMeshes.length <= 2), 'facades and roofs add no draw calls');
-      const mesh = levels[2], positions = mesh.getVerticesData('position'), normals = mesh.getVerticesData('normal'), uv = mesh.getVerticesData('uv');
-      for (let i = 0; i < normals.length; i += 3) if (normals[i + 1] > .9 && positions[i + 1] > .49) {
-        assert.ok(uv[i / 3 * 2] < .01 && uv[i / 3 * 2 + 1] < .01, 'roofs sample the quiet patch rather than windows');
+      assert.ok(levels.every(mesh => mesh.subMeshes.length <= 3), 'body, concrete and roof are batched by material');
+      for (const mesh of levels) {
+        const roof = mesh.subMeshes.find(sub => sub.getMaterial().diffuseTexture?.url.endsWith('/roof-' + levels.indexOf(mesh) + '.webp'));
+        assert.ok(roof, 'dedicated matte roof persists at every LOD');
+        assert.equal(roof.getMaterial().reflectionTexture, null);
+        assert.equal(roof.getMaterial().emissiveTexture, null);
+        assert.ok(mesh.subMeshes.some(sub => sub.getMaterial().diffuseTexture?.url.includes('/concrete-')), 'opaque base uses concrete');
       }
     }
     levels.forEach(mesh => mesh.dispose());
@@ -50,6 +53,13 @@ test('city materials share textures, simplify distant shaders, and keep lights a
   assert.ok(glass.specularPower > near.specularPower);
   assert.equal(near.reflectionTexture, null);
   for (const color of ['#454e50', '#517d85', '#71896a', '#c3baa1', '#505b55', '#b6b2a4']) assert.notEqual(streetSurface(color), 'plain');
+  assert.equal(glass.diffuseTexture.wrapU, 0, 'whole-facade textures never tile');
+  assert.equal(facadeVariant('building-12'), facadeVariant('building-12'));
+  assert.ok(new Set(Array.from({length: 20}, (_, i) => facadeVariant(`building-${i}`))).size === 3);
+  const street = materials.get('#ffffff', 'asphalt', 0, 0, 0, true);
+  assert.equal(street.lightmapTexture.coordinatesIndex, 1);
+  materials.setNight(1); assert.equal(street.lightmapTexture.level, 1);
+  materials.setNight(0); assert.equal(street.lightmapTexture.level, 0);
   scene.dispose(); engine.dispose();
 });
 
@@ -57,7 +67,14 @@ test('every bundled city texture has maps and all LOD variants within a small do
   const folder = new URL('../public/textures/chicago/', import.meta.url), manifest = JSON.parse(readFileSync(new URL('manifest.json', folder), 'utf8'));
   assert.equal(manifest.license, 'CC0-1.0');
   assert.deepEqual(manifest.lodSizes, [512, 128, 32]);
-  for (const name of ['asphalt', 'concrete', 'brick', 'metal', 'grass', ...manifest.derived]) for (const suffix of ['0', '1', '2', 'ao', 'normal', 'specular']) {
+  assert.deepEqual(manifest.facadeLodSizes, [1024, 512, 128]);
+  for (const densities of Object.values(manifest.litWindowFractions)) for (const density of densities) assert.ok(density >= .07 && density < .19);
+  for (const family of manifest.derived.filter(name => name.startsWith('facade-'))) {
+    const masks = [0, 1, 2].map(variant => readFileSync(new URL(`${family}-emission-${variant ? `v${variant}-` : ''}0.webp`, folder)));
+    assert.ok(!masks[0].equals(masks[1]) && !masks[1].equals(masks[2]), 'buildings have different room patterns');
+  }
+  assert.ok(readFileSync(new URL('street-lightmap.webp', folder)).length > 1000);
+  for (const name of ['asphalt', 'concrete', 'brick', 'metal', 'grass', ...manifest.derived]) for (const suffix of ['0', '1', '2', 'ao', 'normal', 'specular', ...(name.startsWith('facade-') ? ['emission-0', 'emission-1', 'emission-2'] : [])]) {
     const raw = readFileSync(new URL(`${name}-${suffix}.webp`, folder));
     assert.equal(raw.subarray(8, 12).toString(), 'WEBP');
   }

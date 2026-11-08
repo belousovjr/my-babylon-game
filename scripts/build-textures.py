@@ -12,63 +12,84 @@ from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageOp
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = {'asphalt': 'Asphalt031', 'concrete': 'Concrete031', 'brick': 'Bricks090', 'metal': 'Metal046A', 'grass': 'Grass004'}
 SIZES = (512, 128, 32)
+FACADE_SIZES = (1024, 512, 128)
+PALETTE = {
+    "asphalt": (51, 55, 56), "concrete": (174, 170, 157), "brick": (147, 125, 101),
+    "metal": (66, 69, 67), "grass": (77, 91, 64), "rail-steel": (112, 65, 47),
+    "roof": (77, 79, 75), "paint": (201, 199, 181), "water": (53, 89, 91),
+}
 
 
-def neutral(image, contrast=0.3):
+def tint(image, color, contrast=0.35):
     gray = ImageOps.grayscale(image)
     mean = ImageStat.Stat(gray).mean[0]
-    return gray.point(lambda n: max(0, min(255, round(222 + (n - mean) * contrast)))).convert('RGB')
+    return Image.merge('RGB', tuple(gray.point(lambda n, c=c: max(0, min(255, round(c + (n - mean) * contrast)))) for c in color))
 
 
 def save_set(out, name, color, ao, normal, roughness=None):
-    # Bake cavity shading into lower LOD albedo: one sample instead of three.
-    for lod, size in enumerate(SIZES):
+    facade_material = name.startswith('facade-')
+    sizes = FACADE_SIZES if facade_material else SIZES
+    for lod, size in enumerate(sizes):
         base = color if lod == 0 else ImageChops.multiply(color, ao.convert('RGB'))
+        if facade_material and lod == 2:
+            base = Image.blend(base, base.filter(ImageFilter.GaussianBlur(12)), 0.65)
         base = base.resize((size, size), Image.Resampling.LANCZOS)
-        if lod == 2 and name.startswith('facade-'):
-            # Retain the eight coarse floor belts when the geometric belts disappear.
-            draw = ImageDraw.Draw(base)
-            for y in range(3, size, 4):
-                draw.line((0, y, size, y), fill=(132, 139, 139))
-        base.save(out / f'{name}-{lod}.webp', quality=82, method=6)
+        base.save(out / f'{name}-{lod}.webp', quality=92 if facade_material else 82, method=6)
     ao.convert('L').save(out / f'{name}-ao.webp', lossless=True, method=6)
     normal.convert('RGB').save(out / f'{name}-normal.webp', quality=90, method=6)
-    # StandardMaterial replaces specularColor with map RGB, rather than multiplying it.
-    strength = (61, 69, 77) if name == 'facade-glass' else (46, 46, 43) if name == 'metal' else (77, 87, 89) if name == 'water' else (6, 6, 6)
+    strength = (30, 33, 35) if name in ('facade-glass', 'facade-dark') else (31, 31, 29) if name == 'metal' else (65, 72, 72) if name == 'water' else (6, 6, 6)
     specular = Image.new('RGBA', (256, 256), (*strength, 255))
-    roughness = roughness if roughness is not None else Image.new('L', (512, 512), 60 if 'glass' in name or name == 'water' else 180)
+    roughness = roughness if roughness is not None else Image.new('L', color.size, 90 if name in ('facade-glass', 'facade-dark', 'water') else 205)
     specular.putalpha(ImageOps.invert(roughness.convert('L')).resize((256, 256), Image.Resampling.LANCZOS))
     specular.save(out / f'{name}-specular.webp', lossless=True, method=6)
 
 
-def facade(base, masonry=False):
-    color = base.copy()
-    ao = Image.new('L', (512, 512), 255)
-    height = Image.new('L', (512, 512), 180)
+def facade(base, masonry=False, dark=False):
+    size = 1024
+    color = base.resize((size, size), Image.Resampling.LANCZOS)
+    ao = Image.new('L', (size, size), 255)
+    height = Image.new('L', (size, size), 160)
     draw, shadow, relief = ImageDraw.Draw(color), ImageDraw.Draw(ao), ImageDraw.Draw(height)
+    rows, columns = (16, 8) if masonry else (32, 12)
+    cell_w, cell_h = size / columns, size / rows
     rng = random.Random(42)
-    rows = 16 if masonry else 32
-    step = 512 // rows
-    for y in range(0, 512, step):
-        for x in range(0, 512, 128 if masonry else 64):
-            width = 128 if masonry else 64
-            inset = 18 if masonry else 3
-            box = (x + inset, y + 5, x + width - inset - 1, y + step - 4)
-            shade = rng.randrange(70, 105)
-            draw.rectangle(box, fill=(shade - 5, shade + 7, shade + 13))
-            draw.line((box[0], box[1], box[2], box[1]), fill=(44, 52, 55), width=2)
-            shadow.rectangle((box[0] - 2, box[1] - 2, box[2] + 2, box[3] + 2), fill=178)
-            shadow.rectangle(box, fill=230)
-            relief.rectangle(box, fill=110)
-        if y % 64 == 0:
-            draw.rectangle((0, y, 511, y + 2), fill=(145, 150, 147))
-            shadow.rectangle((0, y, 511, y + 2), fill=194)
-            relief.rectangle((0, y, 511, y + 2), fill=150)
-    # A small quiet texel patch for roofs, so no extra material/submesh is needed.
-    draw.rectangle((0, 0, 9, 9), fill=(220, 220, 216))
-    shadow.rectangle((0, 0, 9, 9), fill=255)
-    relief.rectangle((0, 0, 9, 9), fill=180)
-    return color, ao, normal_from_height(height)
+    windows = {}
+    for row in range(rows):
+        for col in range(columns):
+            inset = 17 if masonry else 3
+            box = (round(col * cell_w) + inset, round(row * cell_h) + (9 if masonry else 3), round((col + 1) * cell_w) - inset - 1, round((row + 1) * cell_h) - (10 if masonry else 4))
+            shade = rng.randrange(48, 71) if masonry else rng.randrange(57, 82)
+            glass = (shade, shade + 4, shade + 5) if not dark else (round(shade * .52), round(shade * .49), round(shade * .42))
+            draw.rectangle(box, fill=glass)
+            draw.line((box[0], box[1], box[2], box[1]), fill=tuple(min(255, c + 9) for c in glass))
+            shadow.rectangle((box[0] - 1, box[1] - 1, box[2] + 1, box[3] + 1), fill=222 if masonry else 244)
+            shadow.rectangle(box, fill=245)
+            relief.rectangle(box, fill=142)
+            windows[row, col] = box
+    emissions, densities = [], []
+    for variant in range(3):
+        rng = random.Random(97 + variant * 211 + (43 if masonry else 0))
+        lit = set()
+        target = round(rows * columns * (0.10 + variant * 0.025))
+        while len(lit) < target:
+            row, col = rng.randrange(rows), rng.randrange(columns)
+            for dy in range(rng.choice([1, 1, 2])):
+                for dx in range(rng.choice([1, 2, 3])):
+                    if row + dy < rows and col + dx < columns:
+                        lit.add((row + dy, col + dx))
+        emission = Image.new('RGB', color.size)
+        glow = ImageDraw.Draw(emission)
+        for cell in sorted(lit):
+            warmth = rng.choice([(147, 139, 122), (135, 130, 119), (159, 149, 132), (132, 137, 138)])
+            gain = rng.uniform(.7, 1)
+            glow.rectangle(windows[cell], fill=tuple(round(c * gain) for c in warmth))
+        glow.rectangle((0, 0, 20, 20), fill=(0, 0, 0))
+        emissions.append(emission)
+        densities.append(len(lit) / (rows * columns))
+    draw.rectangle((0, 0, 20, 20), fill=PALETTE['roof'])
+    shadow.rectangle((0, 0, 20, 20), fill=255)
+    relief.rectangle((0, 0, 20, 20), fill=160)
+    return color, ao, normal_from_height(height), emissions, densities
 
 
 def normal_from_height(height):
@@ -111,6 +132,37 @@ def environment(out):
         image.filter(ImageFilter.GaussianBlur(1.5)).save(out / f'environment_{face}.jpg', quality=85)
 
 
+def street_lightmap(out):
+    # shortcut: baked snapshot lighting does not follow editor changes; rebuild textures after regenerating the city.
+    snapshot = json.loads((ROOT / 'src/generated/chicago.json').read_text())
+    xmin, zmin, xmax, zmax = snapshot['environment']['bounds']
+    size = 1024
+    scale_x, scale_z = size / (xmax - xmin), size / (zmax - zmin)
+    def point(x, z): return ((x - xmin) * scale_x, (z - zmin) * scale_z)
+    spill = Image.new('RGB', (size, size))
+    draw = ImageDraw.Draw(spill)
+    for obj in snapshot['world']['objects']:
+        x, _, z = obj['position']; width, _, depth = obj['size']
+        a, b = point(x - width / 2, z - depth / 2), point(x + width / 2, z + depth / 2)
+        draw.rectangle((*a, *b), outline=(6, 5, 4), width=2)
+    spill = spill.filter(ImageFilter.GaussianBlur(1.3))
+    pools = Image.new('RGB', (size, size))
+    # Additive soft footprints stay visible independently of the observer and the four live lights.
+    radius = 11 * max(scale_x, scale_z)
+    tile_size = max(8, round(radius * 2 + 4))
+    tile = Image.new('RGB', (tile_size, tile_size)); center = tile_size / 2
+    td = ImageDraw.Draw(tile)
+    for r in range(round(radius), 0, -1):
+        gain = (1 - r / (radius + 1)) ** 1.4
+        td.ellipse((center - r, center - r, center + r, center + r), fill=tuple(round(c * gain) for c in (67, 56, 39)))
+    tile = tile.filter(ImageFilter.GaussianBlur(.8))
+    for lamp in snapshot['environment']['lamps']:
+        x, z = point(lamp['position'][0], lamp['position'][2])
+        layer = Image.new('RGB', pools.size); layer.paste(tile, (round(x - center), round(z - center)))
+        pools = ImageChops.add(pools, layer)
+    ImageChops.add(pools, spill).save(out / 'street-lightmap.webp', lossless=True, method=6)
+
+
 def build(cache, out):
     out.mkdir(parents=True, exist_ok=True)
     sources, prepared = [], {}
@@ -134,31 +186,48 @@ def build(cache, out):
             # Cavity approximation from source height, not a directional shadow bake.
             cavity = ImageChops.subtract(ImageOps.grayscale(height).filter(ImageFilter.GaussianBlur(4)), ImageOps.grayscale(height))
             ao = ImageOps.invert(cavity.point(lambda n: min(70, n * 2)))
-        color = neutral(color, 0.65 if name in ('grass', 'brick') else 0.4)
+        color = tint(color, PALETTE[name], 0.5 if name in ('grass', 'brick') else 0.3)
         if name == 'concrete':
             # Concrete031 is panelled: use it for sidewalks as well as solid structural parts.
             color = ImageEnhance.Contrast(color).enhance(0.8)
         prepared[name] = (color, ao, normal)
         save_set(out, name, color, ao, normal, image('Roughness'))
         sources.append({'id': asset, 'page': f'https://ambientcg.com/view?id={asset}', 'download': url, 'sha256': hashlib.sha256(raw).hexdigest(), 'ao': 'source' if image('AmbientOcclusion') is not None else 'generated cavity from source height'})
-    save_set(out, 'facade-stone', *facade(prepared['concrete'][0], True))
-    save_set(out, 'facade-brick', *facade(prepared['brick'][0], True))
-    save_set(out, 'facade-glass', *facade(Image.new('RGB', (512, 512), (202, 215, 219))))
+    for name, source in [('roof', 'concrete'), ('rail-steel', 'metal')]:
+        color, ao, normal = prepared[source]
+        save_set(out, name, tint(color, PALETTE[name]), ao, normal)
+    facade_density = {}
+    for name, base, masonry, dark in [
+        ('facade-stone', prepared['concrete'][0], True, False),
+        ('facade-brick', prepared['brick'][0], True, False),
+        ('facade-glass', Image.new('RGB', (512, 512), (100, 110, 111)), False, False),
+        ('facade-dark', Image.new('RGB', (512, 512), (48, 46, 41)), False, True),
+    ]:
+        color, ao, normal, emissions, densities = facade(base, masonry, dark)
+        save_set(out, name, color, ao, normal)
+        facade_density[name] = densities
+        for variant, emission in enumerate(emissions):
+            for lod, size in enumerate(FACADE_SIZES):
+                image = emission.resize((size, size), Image.Resampling.LANCZOS)
+                if lod == 2: image = image.filter(ImageFilter.GaussianBlur(0.85))
+                suffix = f'v{variant}-' if variant else ''
+                image.save(out / f'{name}-emission-{suffix}{lod}.webp', quality=90, method=6)
     # Painted markings and quiet river ripples need no external photo or animation.
     rng = random.Random(7)
     for name in ('paint', 'water'):
         height = Image.new('L', (512, 512))
         height.putdata([rng.randrange(110, 146) for _ in range(512 * 512)])
         if name == 'water': height = height.resize((128, 512)).resize((512, 512)).filter(ImageFilter.GaussianBlur(2))
-        color = neutral(height, 0.5)
+        color = tint(height, PALETTE[name], 0.35)
         ao = Image.new('L', (512, 512), 255)
         if name == 'water': ao = ImageOps.grayscale(height).point(lambda n: 210 + n // 6)
         save_set(out, name, color, ao, normal_from_height(height))
     environment(out)
-    manifest = {'license': 'CC0-1.0', 'sources': sources, 'derived': ['facade-stone', 'facade-brick', 'facade-glass', 'paint', 'water'], 'lodSizes': list(SIZES), 'maps': ['albedo', 'ambient occlusion', 'OpenGL normal', 'specular RGB + glossiness alpha (1 - roughness)'], 'runtime': 'LOD0 albedo+AO+normal+specular/glossiness; LOD1/2 albedo with baked AO; all levels have mipmaps'}
+    street_lightmap(out)
+    manifest = {'license': 'CC0-1.0', 'sources': sources, 'derived': ['facade-stone', 'facade-brick', 'facade-glass', 'facade-dark', 'roof', 'rail-steel', 'paint', 'water'], 'lodSizes': list(SIZES), 'facadeLodSizes': list(FACADE_SIZES), 'litWindowFractions': facade_density, 'maps': ['albedo', 'ambient occlusion', 'OpenGL normal', 'specular RGB + glossiness alpha (1 - roughness)'], 'runtime': 'LOD0 albedo+AO+normal+specular/glossiness; LOD1/2 albedo with baked AO; all levels have mipmaps'}
     (out / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
-    sheet = Image.new('RGB', (5 * 192, 2 * 220), '#172b30')
     names = list(ASSETS) + manifest['derived']
+    sheet = Image.new('RGB', (5 * 192, ((len(names) + 4) // 5) * 220), '#172b30')
     for i, name in enumerate(names):
         x, y = i % 5 * 192, i // 5 * 220
         sheet.paste(Image.open(out / f'{name}-0.webp').resize((192, 192)), (x, y))

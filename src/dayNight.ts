@@ -1,0 +1,159 @@
+import { Color3 } from '@babylonjs/core/Maths/math.color.js';
+import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
+import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight.js';
+import { DirectionalLight } from '@babylonjs/core/Lights/directionalLight.js';
+import { SpotLight } from '@babylonjs/core/Lights/spotLight.js';
+import { ShadowGenerator } from '@babylonjs/core/Lights/Shadows/shadowGenerator.js';
+import { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial.js';
+import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
+import type { AbstractMesh } from '@babylonjs/core/Meshes/abstractMesh.js';
+import type { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import type { Scene } from '@babylonjs/core/scene.js';
+
+const smooth = (a: number, b: number, value: number) => { const t = Math.max(0, Math.min(1, (value - a) / (b - a))); return t * t * (3 - 2 * t); };
+export function daylightAt(hour: number) {
+  if (!Number.isFinite(hour)) throw new RangeError('Invalid time of day');
+  hour = (hour % 24 + 24) % 24;
+  const angle = (hour - 6) * Math.PI / 12;
+  const sun = new Vector3(Math.cos(angle), Math.sin(angle), -0.35).normalize();
+  const day = smooth(-0.12, 0.18, sun.y);
+  return { hour, sun, day, night: 1 - smooth(-0.08, 0.16, sun.y), sunset: smooth(-0.2, 0, sun.y) * (1 - smooth(0.05, 0.45, sun.y)) };
+}
+
+export function nearestLamps<T extends { position: Vector3 }>(lamps: T[], eye: Vector3) {
+  return lamps.map(lamp => ({ lamp, distance: (lamp.position.x - eye.x) ** 2 + (lamp.position.z - eye.z) ** 2 }))
+    .filter(item => item.distance < 36 ** 2).sort((a, b) => a.distance - b.distance).slice(0, 4).map(item => item.lamp);
+}
+
+const vertexSource = `precision highp float;
+attribute vec3 position; uniform mat4 worldViewProjection; varying vec3 ray;
+void main(){ ray=position; gl_Position=worldViewProjection*vec4(position,1.0); gl_Position.z=gl_Position.w; }`;
+const fragmentSource = `precision highp float;
+varying vec3 ray; uniform vec3 sunDirection; uniform float day; uniform float sunset; uniform float wind;
+float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+void main(){
+ vec3 d=normalize(ray); float height=smoothstep(-0.06,0.8,d.y);
+ vec3 horizon=mix(vec3(0.045,0.065,0.12),vec3(0.67,0.8,0.9),day);
+ horizon=mix(horizon,vec3(0.94,0.43,0.24),sunset*0.65);
+ vec3 zenith=mix(vec3(0.005,0.012,0.04),vec3(0.12,0.36,0.69),day);
+ vec3 color=mix(horizon,zenith,height);
+ vec2 starUV=d.xz/max(0.22,d.y+0.3); vec2 p=starUV+vec2(wind,wind*0.25);
+ float clouds=sin(p.x*3.0+sin(p.y*2.0))*sin(p.y*2.7+sin(p.x*1.9));
+ clouds=smoothstep(0.22,0.8,clouds)*smoothstep(0.0,0.18,d.y)*0.32;
+ color=mix(color,mix(vec3(0.10,0.13,0.21),vec3(0.96,0.93,0.88),day),clouds);
+ float sunDot=max(0.0,dot(d,sunDirection)), moonDot=max(0.0,dot(d,-sunDirection));
+ color+=vec3(1.0,0.72,0.35)*pow(sunDot,80.0)*0.38;
+ color=mix(color,vec3(1.0,0.92,0.69),smoothstep(0.99965,0.99985,sunDot)*smoothstep(-0.02,0.02,sunDirection.y));
+ color+=vec3(0.21,0.3,0.46)*pow(moonDot,200.0)*(1.0-day)*0.35;
+ color=mix(color,vec3(0.76,0.84,0.97),smoothstep(0.99980,0.99994,moonDot)*(1.0-day));
+ float star=step(0.9975,hash(floor(starUV*170.0)))*(1.0-day)*smoothstep(0.12,0.35,d.y);
+ color+=vec3(0.7,0.79,0.96)*star*(1.0-clouds*2.0);
+ gl_FragColor=vec4(color,1.0);
+}`;
+
+export class DayNight {
+  readonly skyLight: HemisphericLight;
+  readonly sun: DirectionalLight;
+  readonly streetLights: SpotLight[];
+  readonly shadows: ShadowGenerator;
+  private sky: ShaderMaterial;
+  private skyMesh: Mesh;
+  private scene: Scene;
+  private state = daylightAt(14);
+  private lamps: { position: Vector3 }[] = [];
+  private receivers: AbstractMesh[] = [];
+  private casters: AbstractMesh[] = [];
+  private elapsed = 0;
+  private wind = 0;
+  get hour() { return this.state.hour; }
+  get night() { return this.state.night; }
+
+  constructor(scene: Scene) {
+    this.scene = scene;
+    this.skyLight = new HemisphericLight('sky-ambient', Vector3.Up(), scene);
+    this.sun = new DirectionalLight('sun-moon', new Vector3(0, -1, 0), scene);
+    this.sun.shadowFrustumSize = 240; this.sun.shadowMinZ = 1; this.sun.shadowMaxZ = 1600;
+    this.shadows = new ShadowGenerator(1024, this.sun);
+    this.shadows.usePercentageCloserFiltering = true;
+    this.shadows.filteringQuality = ShadowGenerator.QUALITY_LOW;
+    this.shadows.bias = 0.0005; this.shadows.normalBias = 0.12;
+    this.shadows.setDarkness(0.22);
+    this.shadows.getShadowMap()!.refreshRate = 2;
+    this.sky = new ShaderMaterial('day-night-sky', scene, { vertexSource, fragmentSource }, {
+      attributes: ['position'], uniforms: ['worldViewProjection', 'sunDirection', 'day', 'sunset', 'wind'],
+    });
+    this.sky.backFaceCulling = false; this.sky.disableDepthWrite = true;
+    this.skyMesh = MeshBuilder.CreateSphere('sky-dome', { diameter: 2800, segments: 16 }, scene);
+    this.skyMesh.material = this.sky; this.skyMesh.infiniteDistance = true; this.skyMesh.isPickable = false;
+    this.streetLights = Array.from({ length: 4 }, (_, i) => {
+      const light = new SpotLight(`nearby-street-light-${i}`, Vector3.Zero(), Vector3.Down(), Math.PI * 0.78, 2, scene);
+      light.diffuse = new Color3(1, 0.73, 0.4); light.specular = new Color3(0.35, 0.25, 0.14);
+      light.range = 22; light.intensity = 0;
+      // Empty inclusion means "all meshes" in Babylon, so the sky is our inert placeholder.
+      light.includedOnlyMeshes = [this.skyMesh];
+      return light;
+    });
+    this.setTime(14);
+  }
+
+  setTime(hour: number) {
+    this.state = daylightAt(hour);
+    const { day, night, sunset, sun } = this.state;
+    this.sky.setVector3('sunDirection', sun).setFloat('day', day).setFloat('sunset', sunset);
+    this.skyLight.intensity = 0.28 + day * 0.26;
+    this.skyLight.diffuse = Color3.Lerp(new Color3(0.45, 0.55, 0.78), new Color3(0.76, 0.85, 1), day);
+    this.skyLight.groundColor = Color3.Lerp(new Color3(0.2, 0.14, 0.1), new Color3(0.26, 0.29, 0.32), day);
+    this.sun.direction.copyFrom(sun).scaleInPlace(sun.y >= 0 ? -1 : 1);
+    this.sun.intensity = sun.y >= 0 ? smooth(0, 0.25, sun.y) * 1.15 : night * 0.16;
+    this.sun.diffuse = sun.y >= 0 ? Color3.Lerp(new Color3(1, 0.48, 0.23), new Color3(1, 0.96, 0.84), smooth(0, 0.55, sun.y)) : new Color3(0.46, 0.59, 1);
+    this.sun.specular.copyFrom(this.sun.diffuse);
+    this.sun.shadowEnabled = sun.y > 0.06;
+    this.scene.ambientColor = Color3.Lerp(new Color3(0.035, 0.026, 0.022), new Color3(0.015, 0.02, 0.025), day);
+    this.scene.fogColor = Color3.Lerp(new Color3(0.045, 0.065, 0.12), new Color3(0.67, 0.8, 0.9), day);
+    this.scene.fogColor = Color3.Lerp(this.scene.fogColor, new Color3(0.82, 0.43, 0.3), sunset * 0.5);
+    this.elapsed = 1;
+  }
+
+  setWorld(lamps: Mesh[], receivers: AbstractMesh[]) {
+    this.lamps = lamps.map(root => ({ position: Vector3.TransformCoordinates(new Vector3(0.45, 0.4, 0), root.computeWorldMatrix(true)) }));
+    // Hardware instances share their source light list; ground pools use a shared lightmap, live spotlights affect moving actors.
+    this.receivers = receivers.filter(mesh => !mesh.isAnInstance && !mesh.metadata?.procedural && mesh.getTotalVertices() > 0);
+    for (const mesh of this.receivers) mesh.receiveShadows = true;
+    this.casters = receivers.filter(mesh => (!mesh.metadata?.procedural || mesh.metadata.shadowCaster) && mesh.getTotalVertices() > 0);
+    this.elapsed = 1;
+  }
+
+  update(eye: Vector3, dt: number) {
+    this.wind += dt * 0.002;
+    this.sky.setFloat('wind', this.wind);
+    this.sun.position.copyFrom(eye).addInPlaceFromFloats(-this.sun.direction.x * 800, -eye.y - this.sun.direction.y * 800, -this.sun.direction.z * 800);
+    this.elapsed += dt;
+    if (this.elapsed < 0.3) return;
+    this.elapsed = 0;
+    const nearby = this.night > 0.05 ? nearestLamps(this.lamps, eye) : [];
+    this.streetLights.forEach((light, i) => {
+      const lamp = nearby[i];
+      const distance = lamp ? Math.hypot(lamp.position.x - eye.x, lamp.position.z - eye.z) : 36;
+      const intensity = lamp ? this.night * 2.1 * (1 - smooth(18, 36, distance)) : 0;
+      if (lamp) light.position.copyFrom(lamp.position);
+      const meshes = lamp ? this.receivers.filter(mesh => {
+        if (mesh.isDisposed() || !mesh.isEnabled()) return false;
+        mesh.computeWorldMatrix(true);
+        const b = mesh.getBoundingInfo().boundingBox;
+        return Vector3.DistanceSquared(lamp.position, Vector3.Clamp(lamp.position, b.minimumWorld, b.maximumWorld)) < light.range ** 2;
+      }) : [];
+      const included = meshes.length ? meshes : [this.skyMesh];
+      if (light.intensity !== intensity || included.length !== light.includedOnlyMeshes.length || included.some((mesh, j) => mesh !== light.includedOnlyMeshes[j])) {
+        light.includedOnlyMeshes = included;
+      }
+      light.intensity = intensity;
+    });
+    if (this.sun.shadowEnabled) {
+      const near = this.casters.filter(mesh => !mesh.isDisposed() && mesh.isEnabled() && mesh.isVisible).map(mesh => {
+        mesh.computeWorldMatrix(true); const b = mesh.getBoundingInfo().boundingBox;
+        return { mesh, distance: Vector3.DistanceSquared(eye, Vector3.Clamp(eye, b.minimumWorld, b.maximumWorld)) };
+      }).filter(item => item.distance < 120 ** 2).sort((a, b) => a.distance - b.distance).slice(0, 96);
+      this.shadows.getShadowMap()!.renderList = near.map(item => item.mesh);
+    } else this.shadows.getShadowMap()!.renderList = [];
+  }
+}

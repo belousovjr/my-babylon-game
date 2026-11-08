@@ -2,7 +2,6 @@ import { Engine } from '@babylonjs/core/Engines/engine.js';
 import { Scene } from '@babylonjs/core/scene.js';
 import { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera.js';
 import { UniversalCamera } from '@babylonjs/core/Cameras/universalCamera.js';
-import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight.js';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
 import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode.js';
@@ -24,7 +23,8 @@ import type { InstancedMesh } from '@babylonjs/core/Meshes/instancedMesh.js';
 import { drawChicagoStreets, updateStreetDetailLODs } from './streets';
 import { AnimationBlend } from './animationBlend';
 import { LodTransitions, lodDistance, predictLodEye } from './lodTransitions';
-import { CityMaterials, buildingSurface, streetSurface } from './cityMaterials';
+import { CityMaterials, buildingSurface, streetSurface, facadeVariant } from './cityMaterials';
+import { DayNight } from './dayNight';
 import './style.css';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
@@ -34,6 +34,8 @@ app.innerHTML = `
   <div id="intro"><span class="eyebrow">ПЕСОЧНИЦА / ОФЛАЙН</span><h1>Chicago Loop<br>от улицы до силуэта.</h1><p>Река, мосты и архитектура центра Чикаго.</p></div>
   <aside id="editor" hidden aria-label="Редактор карты">
     <div class="panel-heading"><span class="eyebrow">МАСТЕРСКАЯ</span><h2>Редактор локации</h2></div>
+    <label for="day-time">Время суток <output id="day-time-label" for="day-time">14:00</output></label>
+    <input id="day-time" type="range" min="0" max="23.95" step="0.05" value="14" aria-label="Время суток">
     <p id="camera-coordinates" class="muted"></p>
     <p class="muted">Клик по объекту — выбор. ПКМ + WASD — полёт. Q / E — вниз / вверх.</p>
     <div class="tools"><button data-tool="position" class="active">Перенос</button><button data-tool="rotation">Поворот</button><button data-tool="scale">Размер</button></div>
@@ -76,9 +78,7 @@ scene.fogMode = Scene.FOGMODE_LINEAR;
 scene.fogColor = Color3.FromHexString('#bacbcc');
 scene.fogStart = 1500; scene.fogEnd = 4000;
 scene.collisionsEnabled = true;
-const light = new HemisphericLight('sky', new Vector3(0.4, 1, 0.3), scene);
-light.intensity = 1.05;
-light.groundColor = Color3.FromHexString('#56616b');
+const lighting = new DayNight(scene);
 const camera = new ArcRotateCamera('follow', -Math.PI / 2, 1.22, 9, new Vector3(32, 1, 22), scene);
 camera.lowerRadiusLimit = MIN_CAMERA_DISTANCE; camera.upperRadiusLimit = 16;
 camera.lowerBetaLimit = 0.25; camera.upperBetaLimit = Math.PI / 2 + Math.PI / 10;
@@ -128,6 +128,20 @@ const cameraBoom = new FollowCamera();
 scene.activeCamera = followCamera;
 
 const cityMaterials = new CityMaterials(scene, import.meta.env.BASE_URL);
+const originalTemplateColors = new Map(createWorld().templates.map(template => [template.id, template.color]));
+const timeStorageKey = 'block-district-time-of-day-v1';
+try {
+  const saved = localStorage.getItem(timeStorageKey);
+  if (saved !== null && Number.isFinite(Number(saved)) && Number(saved) >= 0 && Number(saved) < 24) lighting.setTime(Number(saved));
+} catch { /* Time controls remain available without storage. */ }
+function describeTime() {
+  const minutes = Math.round(lighting.hour * 60) % 1440;
+  $('day-time-label').textContent = `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+}
+$<HTMLInputElement>('day-time').value = String(lighting.hour);
+describeTime();
+$('day-time').oninput = () => { lighting.setTime(Number($<HTMLInputElement>('day-time').value)); describeTime(); };
+$('day-time').onchange = () => { try { localStorage.setItem(timeStorageKey, String(lighting.hour)); } catch { /* Storage is optional. */ } };
 function material(hex: string, priority = 0) { return cityMaterials.get(hex, 'plain', 0, priority); }
 const playerNeighborhood = new NearbyMeshes(), cameraNeighborhood = new NearbyMeshes();
 const meshes = new Map<string, Mesh>();
@@ -152,6 +166,8 @@ try {
 function refreshNearbySources() {
   playerNeighborhood.setSources(scene.meshes.filter((mesh): mesh is Mesh => mesh instanceof Mesh && mesh.checkCollisions && (mesh.collisionGroup & player.collisionMask) !== 0 && !!mesh.metadata?.worldId));
   cameraNeighborhood.setSources([...meshes.values(), ...proceduralMeshes].filter(mesh => mesh.checkCollisions));
+  lighting.setWorld(furnitureRoots.filter(root => root.metadata.templateId === 'lamp'),
+    [...proceduralMeshes, ...[...modelLevels.values()].flat(), ...visual.getChildMeshes()]);
 }
 function updateCellCoverage(mesh: Mesh) {
   mesh.computeWorldMatrix(true);
@@ -165,12 +181,15 @@ function updateCellCoverage(mesh: Mesh) {
 function attachModel(root: Mesh, template: ObjectTemplate, color: string, pickable: boolean) {
   const headings = root.metadata.signalHeadings as number[] | undefined;
   const bodySurface = template.profile === 'stone' && root.scaling.y < 36 ? 'facade-brick' : buildingSurface(template);
-  const key = `${template.id}:${color}:${bodySurface}:${headings?.join(',') ?? ''}`;
+  const variant = template.kind === 'building' ? facadeVariant(root.name) : 0;
+  const tint = template.profile === 'tree' || color !== originalTemplateColors.get(template.id) ? color : '#ffffff';
+  const key = `${template.id}:${color}:${bodySurface}:${variant}:${headings?.join(',') ?? ''}`;
   let sources = templateMeshes.get(key);
   if (!sources) {
     sources = buildArchitecture(template, scene, material(color), material(color, 1), headings,
-      (lod, accent, luminous) => cityMaterials.get(luminous ? '#ffffff' : color,
-        accent || luminous ? buildingSurface(template, accent, luminous) : bodySurface, lod, accent || luminous ? 1 : 0));
+      (lod, accent, luminous, role) => cityMaterials.get(luminous ? '#ffffff' : tint,
+        accent || luminous || role ? buildingSurface(template, accent, luminous, role) : bodySurface, lod, accent || luminous || role ? 1 : 0, variant));
+    for (const source of sources) source.receiveShadows = true;
     templateMeshes.set(key, sources);
   }
   const levels = sources.map((source, i) => {
@@ -203,7 +222,7 @@ function updateLODs() {
     const bounds = root.getBoundingInfo().boundingBox;
     const distance = lodDistance(eye, predictedLodEye, bounds);
     const level = editing && root === selected && previewLod >= 0 ? Math.min(previewLod, levels.length - 1) : (template.lodDistances ?? []).filter(d => distance >= d).length;
-    const range = template.profile === 'lamp' ? 120 : template.profile === 'traffic_signal' ? 160 : 240;
+    const range = template.profile === 'lamp' ? 120 + lighting.night * 200 : template.profile === 'traffic_signal' ? 160 : 240;
     lodTransitions.request(root, levels, root.metadata.kind === 'building' || distance < range || (editing && root === selected) ? level : -1);
     root.metadata.lod = level;
   }
@@ -229,7 +248,7 @@ function rebuild() {
   refreshTemplates();
   for (const o of world.objects) addMesh(o);
   if (world.environment === 'chicago-loop') {
-    const streets = drawChicagoStreets(scene, (color, lod) => cityMaterials.get(color, streetSurface(color), lod)); proceduralMeshes = streets.meshes;
+    const streets = drawChicagoStreets(scene, (color, lod) => cityMaterials.get('#ffffff', streetSurface(color), lod, 0, 0, true)); proceduralMeshes = streets.meshes;
     for (const [i, prop] of streets.props.entries()) {
       let template = world.templates.find(t => t.id === prop.templateId);
       if (!template && prop.templateId === 'traffic_signal') {
@@ -273,6 +292,7 @@ async function loadCharacter() {
     for (const mesh of result.meshes) { mesh.isPickable = false; mesh.checkCollisions = false; }
     animationBlend = new AnimationBlend(result.animationGroups);
     fallback.dispose();
+    refreshNearbySources();
     notify(startupMessage || 'Готово. WASD — идти · Tab — редактировать');
   } catch (error) {
     console.error('Character loading failed', error);
@@ -626,6 +646,8 @@ engine.runRenderLoop(() => {
   if (starting || initialLods) { lodTransitions.settle(); initialLods = false; }
   for (const root of modelLevels.keys()) lodTransitions.opacity(root, root.visibility);
   lodTransitions.update(dt);
+  cityMaterials.setNight(lighting.night);
+  lighting.update(eye, dt);
   scene.render();
   if (starting && characterReady && scene.isReady()) {
     starting = false;

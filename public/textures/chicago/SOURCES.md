@@ -2,7 +2,7 @@
 
 Runtime textures are local WebP files. No CDN or runtime texture generation.
 Sources and ZIP SHA-256 hashes are in `manifest.json`. All source assets are
-CC0 1.0 Universal: https://docs.ambientcg.com/license/ . The derived facade,
+CC0 1.0 Universal: https://docs.ambientcg.com/license/ . The derived facade, roofing, painted steel, lightmap,
 paint, water and environment images are also dedicated to CC0 1.0.
 
 ## Chicago references (visual reference only; photographs are not redistributed)
@@ -17,10 +17,19 @@ paint, water and environment images are also dedicated to CC0 1.0.
 - Historic Chicago terra cotta cladding (Reliance Building):
   https://webapps1.chicago.gov/landmarksweb/web/landmarkdetails.htm?lanId=1359
 
+- Historic Loop elevated structure, warm brown painted steel at night:
+  https://chaddavis.photography/chicago-l-structure-and-cta-sign-in-the-loop/
+- Chicago night skyline and restrained warm/cool office lighting:
+  https://www.marriott.com/en-us/hotels/chiwi-the-westin-michigan-avenue-chicago/photos/
+  https://www.classicistchicago.org/regional-intensives
+
 These establish a small stylized palette, not photogrammetric replicas of
 individual buildings. Low-rise stone-profile blocks use buff brick; taller
-masonry blocks use a light stone/terra-cotta facade. Existing object colors tint
-neutral texture detail, so editor color controls and skyline colors still work.
+masonry blocks use a light stone/terra-cotta facade. Colors are baked into the textures: neutral grey-green glass, dark bronze/black
+Willis facade, buff masonry, matte concrete bases, charcoal roofing and warm brown
+painted elevated steel. Only rail heads use the neutral metal material. Default
+legacy object colors no longer tint textured surfaces; explicit color overrides
+still work. Concrete and roofs never inherit glazing reflections or window masks.
 
 ## Source textures
 
@@ -39,16 +48,18 @@ python3 -m pip install -r scripts/requirements.txt
 npm run textures:build -- --cache /tmp/chicago-texture-sources
 ```
 
-The script downloads missing sources, normalizes colors for tinting, creates
+The script downloads missing sources, bakes the material palette, creates
 facades and generates all lower-resolution variants. `palette.webp` previews
 the set. It does not run during game startup.
 
 ## Maps and rendering cost
 
-- LOD 0: 512² albedo, AO and OpenGL normal; 256² specular/glossiness.
-- LOD 1: 128² albedo with AO baked in; no normal/AO/specular texture samples.
-- LOD 2: 32² albedo with AO baked in and eight retained facade belts.
-- All textures have mipmaps and bounded 4× anisotropic filtering.
+- Terrain/material albedo: 512² / 128² / 32² for LOD 0 / 1 / 2.
+- Whole-facade albedo and emission: 1024² / 512² / 128²; distant patterns are
+  low-pass filtered before downsampling rather than repeated in tiny tiles.
+- LOD 0 adds AO, OpenGL normal and 256² specular/glossiness; LOD 1/2 use
+  baked AO and omit normal/AO/specular texture samples.
+- Mipmaps, 8× anisotropy for facades and 4× for other materials.
 - Terrain has no duplicate LOD geometry: automatic mip selection reduces its
   texture sampling resolution with distance. Existing detail meshes use their
   own near/far materials. No extra geometry is added for texture LOD.
@@ -61,6 +72,25 @@ the set. It does not run during game startup.
 - No parallax, displacement, real-time reflection probe or alpha-blended glass.
 - Hero, trees, lamp light heads and traffic-signal lenses remain untextured.
 
-Facade roofs sample a small quiet patch in the same texture. This avoids
-windows on roofs without creating additional draw calls. UVs on procedural
+Roof caps and concrete bases persist at every LOD and are batched by material
+(three submeshes for the standard glass building). A quiet patch also keeps windows off the
+underlying horizontal facade faces. UVs on procedural
 surfaces are projected in world units, including walls and bridge undersides.
+
+## Day/night emission
+
+Facade masks use three deterministic layouts of contiguous rooms, approximately
+10–15% lit windows, desaturated warm white and occasional cool white. Masks share
+the albedo layout at every LOD and do not tile across a facade. Roofs remain dark.
+These are self-illumination masks, not individual window lights.
+
+A shared 1024² world-space lightmap provides modest building-edge spill and warm
+street-lamp pools at every distance. It is baked from the generated city snapshot:
+rerun texture generation after rebuilding the city. It does not follow manual
+editor changes. UV2 coordinates stay aligned across procedural mesh cells.
+Four live nearby spotlights affect moving actors; ground lighting does not pop
+when those lights are reassigned. Lamp heads remain emissive in the far LOD and
+have a longer nighttime visibility range.
+
+The reflection cubemap is dimmed at night, not recaptured. Sky, sunlight and
+nearby actor lighting are handled by `src/dayNight.ts`.

@@ -37,27 +37,27 @@ export function attachCollisionGeometry(root: Mesh, source: Mesh): Mesh {
 }
 
 // Local geometry is normalized to the editable collision box. Materials and geometry are shared by instances.
-export function buildArchitecture(template: ObjectTemplate, scene: Scene, material: Material, detailMaterial: Material, signalHeadings: number[] = [0], surfaceMaterial?: (lod: number, accent: boolean, luminous: boolean) => Material): Mesh[] {
+export function buildArchitecture(template: ObjectTemplate, scene: Scene, material: Material, detailMaterial: Material, signalHeadings: number[] = [0], surfaceMaterial?: (lod: number, accent: boolean, luminous: boolean, role?: 'roof' | 'base') => Material): Mesh[] {
   const profile = template.profile ?? 'box';
   return Array.from({ length: (template.lodDistances?.length ?? 0) + 1 }, (_, detail) => {
-    const pieces: Mesh[] = [], accents: Mesh[] = [];
-    const part = (x: number, y: number, z: number, w: number, h: number, d: number, shade = 1, round: boolean | 'sphere' = false, luminous = false) => {
+    const pieces: Mesh[] = [];
+    const part = (x: number, y: number, z: number, w: number, h: number, d: number, shade = 1, round: boolean | 'sphere' = false, luminous = false, role?: 'roof' | 'base') => {
       const mesh = round === 'sphere' ? MeshBuilder.CreateSphere('part', { diameter: 1, segments: 4 }, scene) : round
         ? MeshBuilder.CreateCylinder('part', { diameter: 1, height: 1, tessellation: detail === 0 ? 12 : profile === 'marina' && detail >= 2 ? 6 : 8 }, scene)
         : MeshBuilder.CreateBox('part', { size: 1 }, scene);
       mesh.scaling.set(w, h, d); mesh.position.set(x, y, z);
       mesh.setVerticesData('color', Array.from({ length: mesh.getTotalVertices() }, () => [shade, shade, shade, 1]).flat());
-      mesh.material = surfaceMaterial?.(detail, shade !== 1, luminous) ?? (shade === 1 ? material : detailMaterial);
+      const accent = profile === 'marina' ? shade !== 0.75 : shade !== 1;
+      mesh.material = surfaceMaterial?.(detail, accent, luminous, role) ?? (shade === 1 ? material : detailMaterial);
       if (surfaceMaterial && profile !== 'tree' && !luminous) {
         const positions = mesh.getVerticesData('position')!, normals = mesh.getVerticesData('normal')!, sourceUVs = mesh.getVerticesData('uv')!, uvs: number[] = [];
-        const facade = template.kind === 'building' && shade === 1 && profile !== 'marina';
+        const facade = template.kind === 'building' && !accent && !role;
         for (let i = 0; i < positions.length; i += 3) {
           const px = positions[i]! * w + x, py = positions[i + 1]! * h + y, pz = positions[i + 2]! * d + z;
           const nx = Math.abs(normals[i]!), ny = Math.abs(normals[i + 1]!), nz = Math.abs(normals[i + 2]!);
           if (facade && ny > 0.5) uvs.push(0.004 + positions[i]! * 0.004, 0.004 + positions[i + 2]! * 0.004);
           else if (facade) {
-            const u = round ? sourceUVs[i / 3 * 2]! * Math.PI * template.size[0] / 16
-              : nx > nz ? pz * template.size[2] / 16 : px * template.size[0] / 16;
+            const u = round ? sourceUVs[i / 3 * 2]! : (nx > nz ? pz : px) + 0.5;
             uvs.push(u, py + 0.5);
           } else {
             uvs.push((ny > 0.5 || nz >= nx ? px * template.size[0] : pz * template.size[2]) / 4,
@@ -66,16 +66,20 @@ export function buildArchitecture(template: ObjectTemplate, scene: Scene, materi
         }
         mesh.setVerticesData('uv', uvs);
       }
-      (shade === 1 ? pieces : accents).push(mesh);
+      pieces.push(mesh);
+      if (surfaceMaterial && template.kind === 'building' && !accent && !role && !['glass', 'stone', 'deco'].includes(profile)) {
+        // Keep a matte roof over every stepped volume without changing its silhouette.
+        part(x, y + h / 2 - 0.001, z, w, 0.002, d, 1, round, false, 'roof');
+      }
       return mesh;
     };
     if (profile === 'bundled') {
-      const heights = detail === 2 ? [0.75, 1, 0.52] : [0.52, 0.72, 0.92, 0.72, 1, 0.92, 0.52, 0.72, 0.52];
-      part(0, -0.49, 0, 1, 0.02, 1);
+      const heights = [0.52, 0.72, 0.92, 0.72, 1, 0.92, 0.52, 0.72, 0.52];
+      part(0, -0.49, 0, 1, 0.02, 1, 1, false, false, 'base');
       heights.forEach((h, i) => {
-        const x = detail === 2 ? (i - 1) * 0.2 : (i % 3 - 1) * 0.2;
-        const z = detail === 2 ? 0 : (Math.floor(i / 3) - 1) * 0.22;
-        part(x, -0.5 + h * 0.47, z, 0.2, h * 0.94, detail === 2 ? 0.65 : 0.22);
+        const x = (i % 3 - 1) * 0.2;
+        const z = (Math.floor(i / 3) - 1) * 0.22;
+        part(x, -0.5 + h * 0.47, z, 0.2, h * 0.94, 0.22);
       });
       if (detail === 0) for (const i of [4, 5]) {
         const roof = -0.5 + heights[i]! * 0.94;
@@ -120,20 +124,20 @@ export function buildArchitecture(template: ObjectTemplate, scene: Scene, materi
     } else if (profile === 'lamp') {
       part(0, -0.03, 0, 0.13, 0.94, 0.13, 0.8, detail === 0);
       part(0.23, 0.43, 0, 0.55, 0.04, 0.08, 1.2);
-      if (detail === 0) part(0.45, 0.4, 0, 0.25, 0.05, 0.25, 2, false, true);
+      part(0.45, 0.4, 0, 0.25, 0.05, 0.25, 2, false, true);
     } else {
       part(0, 0, 0, 1, 1, 1);
     }
-    if (detail < 2 && ['glass', 'stone', 'deco'].includes(profile)) {
-      part(0, -0.46, 0, 1.03, 0.08, 1.03, 0.72);
-      part(0, 0.48, 0, 1.02, 0.04, 1.02, 1.25);
+    if (['glass', 'stone', 'deco'].includes(profile)) {
+      part(0, -0.46, 0, 1.03, 0.08, 1.03, 0.72, false, false, 'base');
+      part(0, 0.48, 0, 1.02, 0.04, 1.02, 1.25, false, false, 'roof');
       if (detail === 0) {
         for (let i = 1; i < 8; i++) part(0, -0.5 + i / 8, 0, 1.005, 0.008, 1.005, profile === 'glass' ? 0.7 : 0.87);
         for (const x of [-0.33, 0, 0.33]) for (const z of [-0.502, 0.502]) part(x, 0, z, 0.012, 0.96, 0.012, 1.25);
       }
     }
-    // Group before merging so the body and accents each remain a single submesh.
-    const result = Mesh.MergeMeshes([...pieces, ...accents], true, true, undefined, false, true)!;
+    // Group by material so repeated details share a single submesh.
+    const result = Mesh.MergeMeshes(pieces.sort((a, b) => a.material!.uniqueId - b.material!.uniqueId), true, true, undefined, false, true)!;
     result.name = `template-${template.id}-lod${detail}`;
     result.isPickable = false; result.checkCollisions = false; result.setEnabled(false);
     return result;

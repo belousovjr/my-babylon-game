@@ -41,6 +41,9 @@
     "facade-stone",
     "facade-brick",
     "facade-glass",
+    "facade-dark",
+    "roof",
+    "rail-steel",
     "paint",
     "water"
   ],
@@ -49,6 +52,33 @@
     128,
     32
   ],
+  "facadeLodSizes": [
+    1024,
+    512,
+    128
+  ],
+  "litWindowFractions": {
+    "facade-stone": [
+      0.1171875,
+      0.140625,
+      0.1484375
+    ],
+    "facade-brick": [
+      0.1171875,
+      0.140625,
+      0.1484375
+    ],
+    "facade-glass": [
+      0.1015625,
+      0.13020833333333334,
+      0.15104166666666666
+    ],
+    "facade-dark": [
+      0.1015625,
+      0.13020833333333334,
+      0.15104166666666666
+    ]
+  },
   "maps": [
     "albedo",
     "ambient occlusion",

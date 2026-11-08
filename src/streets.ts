@@ -228,14 +228,15 @@ export function drawChicagoStreets(scene: Scene, material: (color: string, lod: 
     vertexData.positions = b.positions; vertexData.indices = b.indices;
     const normals: number[] = []; VertexData.ComputeNormals(b.positions, b.indices, normals); vertexData.normals = normals;
     // World-space planar UVs keep density and seams stable across cells and LODs.
-    vertexData.uvs = [];
+    vertexData.uvs = []; vertexData.uvs2 = [];
     for (let i = 0; i < b.positions.length; i += 3) {
+      vertexData.uvs2.push((b.positions[i]! - data.bounds[0]!) / (data.bounds[2]! - data.bounds[0]!), (b.positions[i + 2]! - data.bounds[1]!) / (data.bounds[3]! - data.bounds[1]!));
       const nx = Math.abs(normals[i]!), ny = Math.abs(normals[i + 1]!), nz = Math.abs(normals[i + 2]!);
       vertexData.uvs.push((ny > 0.5 || nz >= nx ? b.positions[i]! : b.positions[i + 2]!) / 4,
         (ny > 0.5 ? b.positions[i + 2]! : b.positions[i + 1]!) / 4);
     }
     vertexData.applyToMesh(mesh); mesh.material = material(b.color, b.level); mesh.checkCollisions = b.collision && b.level === 0;
-    mesh.isPickable = mesh.checkCollisions; mesh.metadata = { worldId: mesh.name, kind: 'ground', procedural: true, detailLayer: b.layer, detailLevel: b.level };
+    mesh.isPickable = mesh.checkCollisions; mesh.metadata = { worldId: mesh.name, kind: 'ground', procedural: true, detailLayer: b.layer, detailLevel: b.level, shadowCaster: b.layer === 'rail-structure' || ['#505b55', '#868b83'].includes(b.color) };
     mesh.isVisible = b.level === 0;
     mesh.freezeWorldMatrix(); meshes.push(mesh);
     const lodKey = key.slice(0, key.lastIndexOf(','));
