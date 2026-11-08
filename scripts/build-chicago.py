@@ -34,7 +34,9 @@ def triangles(poly):
     return [[[float(x),float(z)] for x,z in list(t.exterior.coords)[:3]] for t in faces.geoms]
 
 def waterbed_geometry(water):
-    step=16
+    # Resolve the wavy sediment edge without refining the entire channel.
+    water=water.segmentize(2)
+    step=8
     xmin,zmin,xmax,zmax=water.bounds
     result=[]
     for x in range(math.floor(xmin/step)*step,math.ceil(xmax/step)*step,step):

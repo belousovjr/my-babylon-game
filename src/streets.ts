@@ -208,7 +208,7 @@ export function drawChicagoStreets(scene: Scene, material: (color: string, lod: 
     detailLayer = 'world'; detailLevel = 0;
   }
   drawElevatedRailway();
-  walls(data.shorelines, WATER_LEVEL - 8.5, -3.8, '#868b83');
+  walls(data.shorelines, WATER_LEVEL - 3.1, -3.8, '#868b83');
   walls(data.terraceWalls, -3.8, 0, '#868b83');
   surface(data.bridgeDeck, -0.85, '#505b55', true, true);
   walls(data.bridgeEdges, -0.85, 0, '#505b55');
