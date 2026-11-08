@@ -186,21 +186,9 @@ def main():
     paving_edges=[dict(top=height,color=color,lines=rings(poly)) for poly,height,color in [(road_union,0.03,'#454e50'),(sidewalks,0.16,'#b6b2a4'),(curbs,0.18,'#c0bba9')]]
     assert bounds.difference(unary_union([exposed_ground,road_union,sidewalks,curbs,water,riverwalk])).area<1e-6, 'Uncovered terrain seam'
     terrace_lines=rings(river_buffer.intersection(bounds))
-    ramps=[]
-    for p in (list(water.geoms) if hasattr(water,'geoms') else [water]):
-      if p.geom_type!='Polygon':continue
-      c=list(p.exterior.simplify(3).coords)
-      for a,b in zip(c,c[1:]):
-        dx,dz=b[0]-a[0],b[1]-a[1];length=math.hypot(dx,dz)
-        if length<70 or len(ramps)>=4:continue
-        mx,mz=(a[0]+b[0])/2,(a[1]+b[1])/2
-        if not (-700<mx<700 and 200<mz<600):continue
-        nx,nz=-dz/length,dx/length
-        if water.contains(Point(mx+nx*2,mz+nz*2)):nx,nz=-nx,-nz
-        ramps.append({'top':[rounded(mx+nx*8),0.17,rounded(mz+nz*8)],'bottom':[rounded(mx+dx/length*32+nx*3),-3.78,rounded(mz+dz/length*32+nz*3)]})
     signals=traffic_signals(roads,sidewalks,road_union)
     lamps=[lamp for lamp in street_lamps(roads,sidewalks,road_union) if all(math.dist(lamp['position'],signal['position'])>1.5 for signal in signals)]
-    env=dict(crosswalks=pedestrian_crossings(signals,roads,sidewalks,road_union),trafficSignals=signals,lamps=lamps,railway=railway,roadSurface=triangles(road_union),sidewalks=triangles(sidewalks),curbs=triangles(curbs),pavingEdges=paving_edges,terraceWalls=terrace_lines,ramps=ramps,origin=[LON,LAT],bounds=list(map(rounded,bounds.bounds)),roads=roads,terrain=terrain,water=triangles(water),riverwalk=triangles(riverwalk),parks=[tri for p in parks for tri in triangles(p.intersection(exposed_ground))],shorelines=rings(water),bridgeDeck=triangles(bridge),bridgeEdges=rings(bridge),bridgeAbutments=rings(abutments),bridgeRails=[[[float(x),float(z)] for x,z in line.coords] for line in rail_lines if line.geom_type=='LineString' and line.length>1])
+    env=dict(crosswalks=pedestrian_crossings(signals,roads,sidewalks,road_union),trafficSignals=signals,lamps=lamps,railway=railway,roadSurface=triangles(road_union),sidewalks=triangles(sidewalks),curbs=triangles(curbs),pavingEdges=paving_edges,terraceWalls=terrace_lines,origin=[LON,LAT],bounds=list(map(rounded,bounds.bounds)),roads=roads,terrain=terrain,water=triangles(water),riverwalk=triangles(riverwalk),parks=[tri for p in parks for tri in triangles(p.intersection(exposed_ground))],shorelines=rings(water),bridgeDeck=triangles(bridge),bridgeEdges=rings(bridge),bridgeAbutments=rings(abutments),bridgeRails=[[[float(x),float(z)] for x,z in line.coords] for line in rail_lines if line.geom_type=='LineString' and line.length>1])
     env['waterbed']=waterbed_geometry(water)
     output=dict(world=world,environment=env,report=dict(buildings=len(objects),protectedBuildings=protected_ids,fittedBuildings=fitted_count,omittedBuildings=skipped_count,roads=len(roads),families=dict(families),heights=dict(heights),bounds=BBOX,origin=[LON,LAT],licence='ODbL-1.0',attribution='© OpenStreetMap contributors',waterArea=rounded(water.area)))
     assert len({o['id'] for o in objects})==len(objects), 'Duplicate OSM building IDs'

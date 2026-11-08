@@ -226,13 +226,6 @@ export function drawChicagoStreets(scene: Scene, material: (color: string, lod: 
     const a = line[i - 1]!, b = line[i]!, dx = b[0]! - a[0]!, dz = b[1]! - a[1]!;
     box((a[0]! + b[0]!) / 2, 0.66, (a[1]! + b[1]!) / 2, Math.hypot(dx, dz), 1, 0.18, -Math.atan2(dz, dx), '#868b83');
   }
-  for (const ramp of data.ramps) {
-    const a = ramp.top, c = ramp.bottom, dx = c[0]! - a[0]!, dz = c[2]! - a[2]!, length = Math.hypot(dx, dz);
-    const nx = -dz / length * 1.4, nz = dx / length * 1.4;
-    const b = batch(a[0]!, a[2]!, '#b1a993', true), offset = b.positions.length / 3;
-    b.positions.push(a[0]! + nx, a[1]!, a[2]! + nz, a[0]! - nx, a[1]!, a[2]! - nz, c[0]! + nx, c[1]!, c[2]! + nz, c[0]! - nx, c[1]!, c[2]! - nz);
-    b.indices.push(offset, offset + 1, offset + 2, offset + 1, offset + 3, offset + 2);
-  }
   const meshes: Mesh[] = [];
   const fullBatches = new Map<string, Mesh>();
   for (const [key, b] of batches) {

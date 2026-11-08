@@ -56,6 +56,12 @@ test('procedural streets have upward floors and walkable spawn without one objec
   for(const m of meshes) {
     assert.ok(m.metadata.procedural);assert.ok(m.getTotalIndices()>0);
     const normals=m.getVerticesData('normal')!;assert.ok(normals.every(Number.isFinite));
+    const indices=m.getIndices()!;
+    for(let i=0;i<indices.length;i+=3) for(let corner=1;corner<3;corner++) {
+      const a=indices[i]!*3,b=indices[i+corner]!*3;
+      for(let axis=0;axis<3;axis++) assert.ok(Math.abs(normals[a+axis]!-normals[b+axis]!)<1e-5,
+        `${m.name}: planar hard-surface faces must not blend normals across edges`);
+    }
     const positions=m.getVerticesData('position')!,uv=m.getVerticesData('uv')!,uv2=m.getVerticesData('uv2')!;
     assert.equal(uv2.length, m.getTotalVertices()*2);
     for(let i=0;i<positions.length;i+=3) {

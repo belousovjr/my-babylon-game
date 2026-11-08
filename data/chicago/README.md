@@ -63,7 +63,7 @@ check IDs, dimensions, heights, triangle orientation, spawn support and LOD redu
 - Street widths use tagged width, otherwise lane count × 3.2 m, with a 9–26 m fallback envelope.
   Buildings and road geometry can disagree where OSM is incomplete or the rectangle approximation expands a footprint.
 - The Loop street datum is flat at 0 m. Sidewalks +0.16 m, river water -5.5 m and Riverwalk -3.8 m
-  are schematic local elevations, not DEM/LiDAR measurements. Quay walls and four ramps show
+  are schematic local elevations, not DEM/LiDAR measurements. Quay walls show
   the level difference. Only OSM `water=river` receives this treatment; small pools and fountains are omitted.
   Full Lower Wacker/tunnel interiors are excluded.
 - Street bridges share the street datum, with a 0.85 m structural underside and simple solid parapets.
