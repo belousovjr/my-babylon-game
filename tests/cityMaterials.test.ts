@@ -50,6 +50,12 @@ test('city materials share textures, simplify distant shaders, and keep lights a
   const glass = materials.get('#ffffff', 'facade-glass'), metal = materials.get('#ffffff', 'metal'), water = materials.get('#ffffff', 'water');
   assert.equal(glass.reflectionTexture, metal.reflectionTexture);
   assert.equal(metal.reflectionTexture, water.reflectionTexture);
+  assert.ok(water.pluginManager.getPlugin('WaterSurface'));
+  assert.equal(glass.pluginManager.getPlugin('WaterSurface'), null);
+  assert.equal(water.bumpTexture, null);
+  assert.equal(water.ambientTexture, null);
+  assert.equal(water.specularTexture, null);
+  assert.equal(water.backFaceCulling, false);
   assert.ok(glass.roughness < metal.roughness);
   assert.ok(glass.specularPower > near.specularPower);
   assert.equal(near.reflectionTexture, null);

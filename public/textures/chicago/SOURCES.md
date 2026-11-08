@@ -117,3 +117,12 @@ character materials. It follows the flat water level across partially submerged
 objects, with a 6 cm transition; the HUD, sky and above-water fragments are
 untouched. Underwater ray segments accumulate blue-green haze at five times
 the ground fog rate, with a darker night palette. No camera-wide filter, depth texture or extra render pass is used.
+
+## Animated water interface
+
+Only the water surface uses the WaterSurface material plugin. Two travelling
+normal waves drive the existing lighting and static environment reflection;
+wave detail fades between 40 and 180 m and is skipped beyond 180 m. Water skips
+AO, normal and specular texture reads, keeping its color texture and shared
+cube map. No scene capture, refraction buffer, extra pass or geometry displacement
+is used. Surface opacity remains camera-dependent (opaque above, 95% below).

@@ -6,6 +6,7 @@ import { Color3 } from '@babylonjs/core/Maths/math.color.js';
 import { DitheredTileFadeMaterialPlugin } from '@babylonjs/core/Materials/ditheredTileFadeMaterialPlugin.js';
 import type { Scene } from '@babylonjs/core/scene.js';
 import type { ObjectTemplate } from './world';
+import { WaterSurface } from './waterSurface.ts';
 import { WaterPalette } from './waterPalette.ts';
 
 export type CitySurface = 'plain' | 'light' | 'asphalt' | 'concrete' | 'brick' | 'metal' | 'grass' | 'water' | 'riverbed' | 'paint' | 'facade-stone' | 'facade-brick' | 'facade-glass' | 'facade-dark' | 'roof' | 'rail-steel';
@@ -66,7 +67,7 @@ export class CityMaterials {
     if (surface === 'plain' || surface === 'light') material.specularColor = Color3.Black();
     material.specularPower = glass ? 96 : water ? 128 : metal ? 48 : 16;
     material.roughness = glass ? 0.22 : water ? 0.16 : metal ? 0.48 : 0.9;
-    if (water) material.backFaceCulling = false;
+    if (water) { material.backFaceCulling = false; new WaterSurface(material); }
     if (glass || metal || water) {
       this.environment ??= new CubeTexture(`${this.baseUrl}textures/chicago/environment`, this.scene,
         ['_px.jpg', '_py.jpg', '_pz.jpg', '_nx.jpg', '_ny.jpg', '_nz.jpg']);
@@ -80,7 +81,7 @@ export class CityMaterials {
     material.zOffset = -priority; material.zOffsetUnits = -priority;
     if (surface !== 'plain' && surface !== 'light') {
       material.diffuseTexture = this.texture(`${surface}-${level}`, true);
-      if (level === 0) {
+      if (level === 0 && !water) {
         material.ambientTexture = this.texture(`${surface}-ao`, false);
         material.bumpTexture = this.texture(`${surface}-normal`, false);
         material.bumpTexture.level = water ? 0.12 : 0.22;
