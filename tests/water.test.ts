@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { NullEngine } from '@babylonjs/core/Engines/nullEngine.js';
 import { Scene } from '@babylonjs/core/scene.js';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js';
+import { FreeCamera } from '@babylonjs/core/Cameras/freeCamera.js';
 import { Ray } from '@babylonjs/core/Culling/ray.js';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
 import { WATER_LEVEL, riverbedElevation, riverbedDepth } from '../src/water.ts';
@@ -59,4 +60,37 @@ test('long concrete banks have enough bed vertices to show sediment waves', () =
   ).map(p=>((p[0]-a[0])*dx+(p[1]-a[1])*dz)/size).filter(d=>d>=0 && d<=size).sort((a,b)=>a-b);
   assert.ok(distances.length>size/2);
   for(let i=1;i<distances.length;i++) assert.ok(distances[i]-distances[i-1]<=2.001);
+});
+
+
+test('riverbed renders only below water while surface becomes translucent', () => {
+  const engine = new NullEngine(), scene = new Scene(engine);
+  const materials = new Map();
+  const meshes = drawChicagoStreets(scene, color => {
+    if (!materials.has(color)) materials.set(color, new StandardMaterial(color, scene));
+    return materials.get(color);
+  }).meshes;
+  const beds = meshes.filter(mesh => mesh.name.includes('#6a644e'));
+  const water = materials.get('#517d85');
+  const camera = new FreeCamera('water-test', new Vector3(0, WATER_LEVEL + 3, 0), scene);
+  camera.minZ = 1;
+  const update = () => { camera.getViewMatrix(true); scene.onBeforeCameraRenderObservable.notifyObservers(camera); };
+  update();
+  assert.ok(beds.every(mesh => !mesh.isVisible && mesh.checkCollisions));
+  assert.equal(water.alpha, 1);
+  camera.position.y = WATER_LEVEL + .01;
+  update();
+  assert.ok(beds.every(mesh => mesh.isVisible), 'bed is ready when the near plane first crosses water');
+  assert.equal(water.alpha, 1, 'water stays opaque while the camera origin is above it');
+  camera.position.y = WATER_LEVEL - .001;
+  update();
+  assert.ok(beds.every(mesh => mesh.isVisible));
+  assert.equal(water.alpha, .65);
+  camera.position.y = WATER_LEVEL + 3;
+  update();
+  assert.ok(beds.every(mesh => !mesh.isVisible));
+  assert.equal(water.alpha, 1);
+  meshes[0].dispose();
+  assert.equal(scene.onBeforeCameraRenderObservable.hasObservers(), false);
+  scene.dispose(); engine.dispose();
 });

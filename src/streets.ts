@@ -246,6 +246,18 @@ export function drawChicagoStreets(scene: Scene, material: (color: string, lod: 
     if (b.level === 0) fullBatches.set(lodKey, mesh);
     else mesh.metadata.lodBounds = fullBatches.get(lodKey)?.getBoundingInfo().boundingBox;
   }
+  const beds = meshes.filter(mesh => mesh.name.includes('#6a644e'));
+  const waterMaterials = new Set(meshes.filter(mesh => mesh.name.includes('#517d85')).map(mesh => mesh.material!));
+  for (const bed of beds) bed.isVisible = false;
+  const waterView = scene.onBeforeCameraRenderObservable.add(camera => {
+    const underwater = camera.globalPosition.y < WATER_LEVEL;
+    // The near plane can cross the surface while the camera origin is still above it.
+    const aspect = scene.getEngine().getAspectRatio(camera);
+    const nearRadius = camera.minZ * Math.sqrt(1 + Math.tan(camera.fov / 2) ** 2 * (1 + aspect ** 2));
+    for (const bed of beds) bed.isVisible = camera.globalPosition.y - nearRadius < WATER_LEVEL;
+    for (const material of waterMaterials) material.alpha = underwater ? .65 : 1;
+  });
+  meshes[0]?.onDisposeObservable.addOnce(() => scene.onBeforeCameraRenderObservable.remove(waterView));
   const groundRay = new Ray(Vector3.Zero(), Vector3.Down(), 7);
   for (const prop of props) {
     prop.position[0] = Math.max(data.bounds[0]! + 0.25, Math.min(data.bounds[2]! - 0.25, prop.position[0]));
