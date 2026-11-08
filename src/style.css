@@ -53,3 +53,23 @@ footer { position: absolute; bottom: 22px; left: 32px; right: 32px; display: fle
 
 #day-time-label { float: right; color: #efc57e; font-variant-numeric: tabular-nums; }
 #editor input[type=range] { padding: 0; background: transparent; border: 0; accent-color: #d4a663; cursor: ew-resize; }
+
+/* Apply the film treatment to the complete page, including the HUD and editor. */
+body { filter: sepia(0.05); }
+body::after {
+  content: '';
+  position: fixed;
+  inset: -128px;
+  z-index: 2147483647;
+  pointer-events: none;
+  opacity: 0.1;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Cfilter id='grain'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='1' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Cpath d='M0 0h128v128H0z' filter='url(%23grain)'/%3E%3C/svg%3E");
+  animation: film-grain 0.8s steps(1, end) infinite;
+}
+@keyframes film-grain {
+  0%, 100% { transform: translate(0, 0); }
+  25% { transform: translate(-23px, -47px); }
+  50% { transform: translate(-61px, -17px); }
+  75% { transform: translate(-37px, -89px); }
+}
+@media (prefers-reduced-motion: reduce) { body::after { animation: none; } }
