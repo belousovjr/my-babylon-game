@@ -72,6 +72,11 @@ the set. It does not run during game startup.
 - No parallax, displacement, real-time reflection probe or alpha-blended glass.
 - Hero, trees, lamp light heads and traffic-signal lenses remain untextured.
 
+`src/facadeLayout.json` defines the window grid for both the texture baker and
+architectural geometry. Facade UVs span the exposed wall between base and roof;
+structural belts and ribs follow window-cell boundaries and fit inside their
+opaque gaps, with filtering margin. Geometry and night masks use the same layout.
+
 Roof caps and concrete bases persist at every LOD and are batched by material
 (three submeshes for the standard glass building). A quiet patch also keeps windows off the
 underlying horizontal facade faces. UVs on procedural

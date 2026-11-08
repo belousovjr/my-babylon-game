@@ -10,6 +10,7 @@ import zipfile
 from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageOps, ImageStat
 
 ROOT = Path(__file__).resolve().parents[1]
+FACADE_LAYOUT = json.loads((ROOT / 'src/facadeLayout.json').read_text())
 ASSETS = {'asphalt': 'Asphalt031', 'concrete': 'Concrete031', 'brick': 'Bricks090', 'metal': 'Metal046A', 'grass': 'Grass004'}
 SIZES = (512, 128, 32)
 FACADE_SIZES = (1024, 512, 128)
@@ -45,19 +46,20 @@ def save_set(out, name, color, ao, normal, roughness=None):
 
 
 def facade(base, masonry=False, dark=False):
-    size = 1024
+    size = FACADE_LAYOUT['size']
+    grid = FACADE_LAYOUT['masonry' if masonry else 'glass']
     color = base.resize((size, size), Image.Resampling.LANCZOS)
     ao = Image.new('L', (size, size), 255)
     height = Image.new('L', (size, size), 160)
     draw, shadow, relief = ImageDraw.Draw(color), ImageDraw.Draw(ao), ImageDraw.Draw(height)
-    rows, columns = (16, 8) if masonry else (32, 12)
+    rows, columns = grid['rows'], grid['columns']
     cell_w, cell_h = size / columns, size / rows
     rng = random.Random(42)
     windows = {}
     for row in range(rows):
         for col in range(columns):
-            inset = 17 if masonry else 3
-            box = (round(col * cell_w) + inset, round(row * cell_h) + (9 if masonry else 3), round((col + 1) * cell_w) - inset - 1, round((row + 1) * cell_h) - (10 if masonry else 4))
+            inset = grid['insetX']
+            box = (round(col * cell_w) + inset, round(row * cell_h) + grid['insetTop'], round((col + 1) * cell_w) - inset - 1, round((row + 1) * cell_h) - grid['insetBottom'])
             shade = rng.randrange(48, 71) if masonry else rng.randrange(57, 82)
             glass = (shade, shade + 4, shade + 5) if not dark else (round(shade * .52), round(shade * .49), round(shade * .42))
             draw.rectangle(box, fill=glass)

@@ -3,6 +3,7 @@ import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
 import type { Scene } from '@babylonjs/core/scene.js';
 import type { Material } from '@babylonjs/core/Materials/material.js';
 import type { ObjectTemplate } from './world';
+import facadeLayout from './facadeLayout.json' with { type: 'json' };
 
 export const PROFILES = ['box', 'glass', 'stone', 'deco', 'bundled', 'rounded', 'marina', 'gothic', 'clock', 'tree', 'lamp', 'traffic_signal'] as const;
 export type Profile = typeof PROFILES[number];
@@ -46,6 +47,10 @@ export function attachCollisionGeometry(root: Mesh, source: Mesh): Mesh {
 // Local geometry is normalized to the editable collision box. Materials and geometry are shared by instances.
 export function buildArchitecture(template: ObjectTemplate, scene: Scene, material: Material, detailMaterial: Material, signalHeadings: number[] = [0], surfaceMaterial?: (lod: number, accent: boolean, luminous: boolean, role?: 'roof' | 'base') => Material): Mesh[] {
   const profile = template.profile ?? 'box';
+  const panelled = ['glass', 'stone', 'deco'].includes(profile);
+  const grid = profile === 'glass' ? facadeLayout.glass : facadeLayout.masonry;
+  const { bodyBottom, bodyTop } = facadeLayout;
+  const bodyHeight = bodyTop - bodyBottom;
   return Array.from({ length: (template.lodDistances?.length ?? 0) + 1 }, (_, detail) => {
     const pieces: Mesh[] = [];
     const part = (x: number, y: number, z: number, w: number, h: number, d: number, shade = 1, round: boolean | 'sphere' = false, luminous = false, role?: 'roof' | 'base') => {
@@ -65,7 +70,7 @@ export function buildArchitecture(template: ObjectTemplate, scene: Scene, materi
           if (facade && ny > 0.5) uvs.push(0.004 + positions[i]! * 0.004, 0.004 + positions[i + 2]! * 0.004);
           else if (facade) {
             const u = round ? sourceUVs[i / 3 * 2]! : (nx > nz ? pz : px) + 0.5;
-            uvs.push(u, py + 0.5);
+            uvs.push(u, panelled ? (py - bodyBottom) / bodyHeight : py + 0.5);
           } else {
             uvs.push((ny > 0.5 || nz >= nx ? px * template.size[0] : pz * template.size[2]) / 4,
               (ny > 0.5 ? pz * template.size[2] : py * template.size[1]) / 4);
@@ -135,12 +140,21 @@ export function buildArchitecture(template: ObjectTemplate, scene: Scene, materi
     } else {
       part(0, 0, 0, 1, 1, 1);
     }
-    if (['glass', 'stone', 'deco'].includes(profile)) {
-      part(0, -0.46, 0, 1.03, 0.08, 1.03, 0.72, false, false, 'base');
-      part(0, 0.48, 0, 1.02, 0.04, 1.02, 1.25, false, false, 'roof');
+    if (panelled) {
+      part(0, (-0.5 + bodyBottom) / 2, 0, 1.03, bodyBottom + 0.5, 1.03, 0.72, false, false, 'base');
+      part(0, (bodyTop + 0.5) / 2, 0, 1.02, 0.5 - bodyTop, 1.02, 1.25, false, false, 'roof');
       if (detail === 0) {
-        for (let i = 1; i < 8; i++) part(0, -0.5 + i / 8, 0, 1.005, 0.008, 1.005, profile === 'glass' ? 0.7 : 0.87);
-        for (const x of [-0.33, 0, 0.33]) for (const z of [-0.502, 0.502]) part(x, 0, z, 0.012, 0.96, 0.012, 1.25);
+        // Place structural details on window-cell boundaries and keep them inside the opaque gaps.
+        const beltHeight = Math.min(0.008, 1.6 * Math.min(grid.insetTop, grid.insetBottom) / facadeLayout.size * bodyHeight);
+        const ribWidth = Math.min(0.012, 1.6 * grid.insetX / facadeLayout.size);
+        for (let i = 1; i < 8; i++) {
+          const row = Math.round(grid.rows * i / 8);
+          part(0, bodyBottom + row / grid.rows * bodyHeight, 0, 1.005, beltHeight, 1.005, profile === 'glass' ? 0.7 : 0.87);
+        }
+        for (const fraction of [1 / 6, 1 / 2, 5 / 6]) {
+          const x = Math.round(grid.columns * fraction) / grid.columns - 0.5;
+          for (const z of [-0.502, 0.502]) part(x, (bodyTop + bodyBottom) / 2, z, ribWidth, bodyHeight, 0.012, 1.25);
+        }
       }
     }
     // Group by material so repeated details share a single submesh.
