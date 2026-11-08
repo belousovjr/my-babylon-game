@@ -72,7 +72,10 @@ app.innerHTML = `
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const canvas = $<HTMLCanvasElement>('renderCanvas');
 const engine = new Engine(canvas, true, { stencil: true });
-engine.setHardwareScalingLevel(Math.max(1, window.devicePixelRatio / 1.5));
+function resizeRenderer() {
+  engine.setHardwareScalingLevel(Math.max(1, canvas.clientWidth / 1920, canvas.clientHeight / 1080));
+}
+resizeRenderer();
 const scene = new Scene(engine);
 scene.clearColor = Color4.FromHexString('#bacbccff');
 scene.collisionsEnabled = true;
@@ -665,4 +668,4 @@ engine.runRenderLoop(() => {
     if (editing) { describeSelection(); describeEditorCamera(); saveEditorCamera(); }
   }
 });
-window.addEventListener('resize', () => engine.resize());
+window.addEventListener('resize', resizeRenderer);
