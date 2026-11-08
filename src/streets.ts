@@ -255,7 +255,7 @@ export function drawChicagoStreets(scene: Scene, material: (color: string, lod: 
     const aspect = scene.getEngine().getAspectRatio(camera);
     const nearRadius = camera.minZ * Math.sqrt(1 + Math.tan(camera.fov / 2) ** 2 * (1 + aspect ** 2));
     for (const bed of beds) bed.isVisible = camera.globalPosition.y - nearRadius < WATER_LEVEL;
-    for (const material of waterMaterials) material.alpha = underwater ? .65 : 1;
+    for (const material of waterMaterials) material.alpha = underwater ? .95 : 1;
   });
   meshes[0]?.onDisposeObservable.addOnce(() => scene.onBeforeCameraRenderObservable.remove(waterView));
   const groundRay = new Ray(Vector3.Zero(), Vector3.Down(), 7);

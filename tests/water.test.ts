@@ -85,7 +85,7 @@ test('riverbed renders only below water while surface becomes translucent', () =
   camera.position.y = WATER_LEVEL - .001;
   update();
   assert.ok(beds.every(mesh => mesh.isVisible));
-  assert.equal(water.alpha, .65);
+  assert.equal(water.alpha, .95);
   camera.position.y = WATER_LEVEL + 3;
   update();
   assert.ok(beds.every(mesh => !mesh.isVisible));
