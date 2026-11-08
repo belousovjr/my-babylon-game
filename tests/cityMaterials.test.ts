@@ -59,6 +59,10 @@ test('city materials share textures, simplify distant shaders, and keep lights a
   assert.ok(glass.roughness < metal.roughness);
   assert.ok(glass.specularPower > near.specularPower);
   assert.equal(near.reflectionTexture, null);
+  assert.ok(near.pluginManager.getPlugin('SurfaceDetail'));
+  assert.ok(materials.get('#ffffff','roof').pluginManager.getPlugin('SurfaceDetail'));
+  assert.equal(glass.pluginManager.getPlugin('SurfaceDetail'),null);
+  assert.equal(water.pluginManager.getPlugin('SurfaceDetail'),null);
   for (const color of ['#454e50', '#517d85', '#71896a', '#c3baa1', '#505b55', '#b6b2a4']) assert.notEqual(streetSurface(color), 'plain');
   assert.equal(glass.diffuseTexture.wrapU, 0, 'whole-facade textures never tile');
   assert.equal(facadeVariant('building-12'), facadeVariant('building-12'));

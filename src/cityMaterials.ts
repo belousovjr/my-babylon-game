@@ -6,6 +6,8 @@ import { Color3 } from '@babylonjs/core/Maths/math.color.js';
 import { DitheredTileFadeMaterialPlugin } from '@babylonjs/core/Materials/ditheredTileFadeMaterialPlugin.js';
 import type { Scene } from '@babylonjs/core/scene.js';
 import type { ObjectTemplate } from './world';
+import { SurfaceDetail } from './surfaceDetail.ts';
+import surfaceAverages from './surfaceAverages.json' with { type: 'json' };
 import { WaterSurface } from './waterSurface.ts';
 import { WaterPalette } from './waterPalette.ts';
 
@@ -60,6 +62,7 @@ export class CityMaterials {
     if (material) return material;
     material = new StandardMaterial(key, this.scene);
     new WaterPalette(material);
+    if (surface in surfaceAverages) new SurfaceDetail(material, surfaceAverages[surface as keyof typeof surfaceAverages][level]!);
     material.maxSimultaneousLights = 6;
     material.diffuseColor = Color3.FromHexString(color);
     const glass = surface === 'facade-glass' || surface === 'facade-dark', metal = surface === 'metal', water = surface === 'water';

@@ -45,6 +45,14 @@ def save_set(out, name, color, ao, normal, roughness=None):
     specular.save(out / f'{name}-specular.webp', lossless=True, method=6)
 
 
+def surface_averages(out):
+    averages = {}
+    for name in ['asphalt', 'concrete', 'metal', 'grass', 'roof', 'rail-steel', 'riverbed', 'paint']:
+        ao = ImageStat.Stat(Image.open(out / f'{name}-ao.webp').convert('L')).mean[0] / 255
+        averages[name] = [[*[round(c / 255, 6) for c in ImageStat.Stat(Image.open(out / f'{name}-{lod}.webp').convert('RGB')).mean], round(ao, 6)] for lod in range(3)]
+    (ROOT / 'src/surfaceAverages.json').write_text(json.dumps(averages, indent=2) + '\n')
+
+
 def facade(base, masonry=False, dark=False):
     size = FACADE_LAYOUT['size']
     grid = FACADE_LAYOUT['masonry' if masonry else 'glass']
@@ -232,6 +240,7 @@ def build(cache, out):
         ao = Image.new('L', (512, 512), 255)
         if name == 'water': ao = ImageOps.grayscale(height).point(lambda n: 210 + n // 6)
         save_set(out, name, color, ao, normal_from_height(height))
+    surface_averages(out)
     environment(out)
     street_lightmap(out)
     manifest = {'license': 'CC0-1.0', 'sources': sources, 'derived': ['facade-stone', 'facade-brick', 'facade-glass', 'facade-dark', 'roof', 'rail-steel', 'riverbed', 'paint', 'water'], 'lodSizes': list(SIZES), 'facadeLodSizes': list(FACADE_SIZES), 'litWindowFractions': facade_density, 'maps': ['albedo', 'ambient occlusion', 'OpenGL normal', 'specular RGB + glossiness alpha (1 - roughness)'], 'runtime': 'LOD0 albedo+AO+normal+specular/glossiness; LOD1/2 albedo with baked AO; all levels have mipmaps'}
