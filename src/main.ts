@@ -62,7 +62,7 @@ function updateActiveCell() {
 }
 function refreshNearbySources() {
   const candidates = visualCandidates(scene.meshes, performanceFlags);
-  scene.getActiveMeshCandidates = () => candidates;
+  scene.getActiveMeshCandidates = candidates.active;
   playerNeighborhood.setSources(scene.meshes.filter((mesh): mesh is Mesh => mesh instanceof Mesh && mesh.checkCollisions && (mesh.collisionGroup & player.collisionMask) !== 0 && !!mesh.metadata?.worldId));
   cameraNeighborhood.setSources([...city.meshes.values(), ...city.proceduralMeshes].filter(mesh => mesh.checkCollisions));
   lighting.setWorld(city.furnitureRoots.filter(root => root.metadata.templateId === 'lamp'),
@@ -113,7 +113,7 @@ let lodTime = 0;
 const fadedLastFrame = new Set<Mesh>();
 bindPerformanceControls(performanceFlags, () => {
   const candidates = visualCandidates(scene.meshes, performanceFlags);
-  scene.getActiveMeshCandidates = () => candidates;
+  scene.getActiveMeshCandidates = candidates.active;
   scene.shadowsEnabled = lighting.shadowsEnabled = performanceFlags.shadows;
   lighting.shadows.getShadowMap()!.resetRefreshCounter();
   MaterialFlags.BumpTextureEnabled = performanceFlags.materials;

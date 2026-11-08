@@ -10,5 +10,12 @@ export function visualCandidates(meshes: AbstractMesh[], flags?: PerformanceFlag
     if (['#517d85', '#6a644e'].includes(mesh.metadata?.surface)) return flags.water;
     return flags.city || !(mesh.metadata?.worldId || mesh.metadata?.procedural);
   }) : data;
-  return { data: visible, length: visible.length };
+  const active = { data: [] as AbstractMesh[], length: 0 };
+  return { data: visible, length: visible.length, active: () => {
+    active.data.length = 0;
+    // Babylon checks shader readiness before visibility; skip hidden LODs before that expensive check.
+    for (const mesh of visible) if (mesh.isVisible && mesh.visibility > 0 && mesh.isEnabled()) active.data.push(mesh);
+    active.length = active.data.length;
+    return active;
+  } };
 }

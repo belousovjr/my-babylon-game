@@ -35,3 +35,23 @@ test('diagnostic category switches are independent and fully reversible',async()
   assert.equal(scene.meshes.length,5,'diagnostic switches never destroy scene objects');
   scene.dispose();engine.dispose();
 });
+
+test('active candidates skip hidden LODs before readiness checks and follow visibility changes without rebuilding', () => {
+  const engine = new NullEngine(), scene = new Scene(engine);
+  const near = MeshBuilder.CreateBox('near', {}, scene), far = MeshBuilder.CreateBox('far', {}, scene);
+  far.isVisible = false;
+  const candidates = visualCandidates(scene.meshes);
+  const buffer = candidates.active();
+  assert.deepEqual(buffer.data, [near]);
+  near.isVisible = false; far.isVisible = true;
+  assert.equal(candidates.active(), buffer, 'reuse the frame buffer');
+  assert.deepEqual(buffer.data, [far]);
+  far.setEnabled(false);
+  assert.equal(candidates.active().length, 0);
+  far.setEnabled(true); far.visibility = 0;
+  assert.equal(candidates.active().length, 0);
+  far.visibility = 1;
+  assert.deepEqual(candidates.active().data, [far]);
+  assert.equal(scene.meshes.length, 2, 'physics and LOD sources stay intact');
+  scene.dispose(); engine.dispose();
+});
