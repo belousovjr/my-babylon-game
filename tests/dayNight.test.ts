@@ -44,7 +44,7 @@ test('window and lamp emission updates at every LOD without adding textures to l
   const lamp = materials.get('#ffffff', 'light');
   materials.setNight(1);
   for (const facade of facades) {
-    assert.equal(facade.emissiveTexture.level, .42);
+    assert.equal(facade.emissiveTexture.level, 1.68);
     assert.equal(facade.useEmissiveAsIllumination, true);
     assert.equal(facade.isFrozen, false, 'native dynamic uniforms and per-mesh light lists stay live');
   }

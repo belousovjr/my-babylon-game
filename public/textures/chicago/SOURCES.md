@@ -82,9 +82,12 @@ surfaces are projected in world units, including walls and bridge undersides.
 Facade masks use three deterministic layouts of contiguous rooms, approximately
 10–15% lit windows, desaturated warm white and occasional cool white. Masks share
 the albedo layout at every LOD and do not tile across a facade. Roofs remain dark.
+Eight percent of all windows are selected from the lit rooms and emit four times
+as much light. The maps reserve 4× headroom so ordinary windows keep their previous
+brightness without clipping the brighter ones.
 These are self-illumination masks, not individual window lights.
 
-A shared 1024² world-space lightmap provides modest building-edge spill and warm
+A shared 1024² world-space lightmap provides a denser, warm building-edge spill and warm
 street-lamp pools at every distance. It is baked from the generated city snapshot:
 rerun texture generation after rebuilding the city. It does not follow manual
 editor changes. UV2 coordinates stay aligned across procedural mesh cells.

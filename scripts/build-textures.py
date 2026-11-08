@@ -77,12 +77,19 @@ def facade(base, masonry=False, dark=False):
                 for dx in range(rng.choice([1, 2, 3])):
                     if row + dy < rows and col + dx < columns:
                         lit.add((row + dy, col + dx))
+        bright = set(random.Random(701 + variant).sample(sorted(lit), round(rows * columns * .08)))
+        assert abs(len(bright) / (rows * columns) - .08) <= 1 / (rows * columns)
         emission = Image.new('RGB', color.size)
         glow = ImageDraw.Draw(emission)
         for cell in sorted(lit):
             warmth = rng.choice([(147, 139, 122), (135, 130, 119), (159, 149, 132), (132, 137, 138)])
             gain = rng.uniform(.7, 1)
-            glow.rectangle(windows[cell], fill=tuple(round(c * gain) for c in warmth))
+            # Reserve 4x headroom in the map; the material restores normal window brightness.
+            value = tuple(round(c * gain) for c in warmth)
+            encoded = value if cell in bright else tuple(round(c / 4) for c in value)
+            if cell not in bright:
+                assert all(abs(c - low * 4) <= 2 for c, low in zip(value, encoded))
+            glow.rectangle(windows[cell], fill=encoded)
         glow.rectangle((0, 0, 20, 20), fill=(0, 0, 0))
         emissions.append(emission)
         densities.append(len(lit) / (rows * columns))
@@ -143,9 +150,10 @@ def street_lightmap(out):
     draw = ImageDraw.Draw(spill)
     for obj in snapshot['world']['objects']:
         x, _, z = obj['position']; width, _, depth = obj['size']
-        a, b = point(x - width / 2, z - depth / 2), point(x + width / 2, z + depth / 2)
-        draw.rectangle((*a, *b), outline=(6, 5, 4), width=2)
-    spill = spill.filter(ImageFilter.GaussianBlur(1.3))
+        # Extend the pool beyond the footprint so the building cannot hide its own spill.
+        a, b = point(x - width / 2 - 4, z - depth / 2 - 4), point(x + width / 2 + 4, z + depth / 2 + 4)
+        draw.rectangle((*a, *b), outline=(63, 48, 32), width=3)
+    spill = spill.filter(ImageFilter.GaussianBlur(.75))
     pools = Image.new('RGB', (size, size))
     # Additive soft footprints stay visible independently of the observer and the four live lights.
     radius = 11 * max(scale_x, scale_z)

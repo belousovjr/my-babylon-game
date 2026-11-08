@@ -86,7 +86,7 @@ export class CityMaterials {
     }
     if (surface.startsWith('facade-')) {
       material.emissiveTexture = this.texture(`${surface}-emission-${variant ? `v${variant}-` : ''}${level}`, true);
-      material.emissiveTexture.level = this.night * 0.42;
+      material.emissiveTexture.level = this.night * 1.68;
       material.useEmissiveAsIllumination = true;
     }
     if (street && ['asphalt', 'concrete', 'grass', 'paint'].includes(surface)) {
@@ -107,7 +107,7 @@ export class CityMaterials {
   setNight(night: number) {
     if (night === this.night) return;
     this.night = night;
-    for (const [name, texture] of this.textures) if (name.includes('-emission-')) texture.level = night * 0.42;
+    for (const [name, texture] of this.textures) if (name.includes('-emission-')) texture.level = night * 1.68;
     const street = this.textures.get('street-lightmap');
     if (street) street.level = night;
     for (const material of this.luminous) material.emissiveColor.set(night, night * 0.84, night * 0.6);
