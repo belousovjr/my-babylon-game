@@ -1,3 +1,4 @@
+import { streetSurface } from './cityMaterials.ts';
 import { treeOverlapsRoad } from './treePlacement.ts';
 import { wallSections } from './wallGeometry.ts';
 import { RENDER_SETTINGS } from './renderSettings.ts';
@@ -244,9 +245,25 @@ export function drawChicagoStreets(scene: Scene, material: (color: string, lod: 
     const a = line[i - 1]!, b = line[i]!, dx = b[0]! - a[0]!, dz = b[1]! - a[1]!;
     box((a[0]! + b[0]!) / 2, 0.66, (a[1]! + b[1]!) / 2, Math.hypot(dx, dz), 1, 0.18, -Math.atan2(dz, dx), '#868b83');
   }
+  // Concrete colours resolve to the same material; combine within the existing cell/collision/shadow boundaries.
+  const combined = new Map<string, { key: string; batch: ReturnType<typeof batch> }>();
+  for (const [key, b] of batches) {
+    const surfaceMaterial = material(b.color, b.level);
+    const shadow = ['#505b55', '#868b83'].includes(b.color);
+    const cell = key.split(',').slice(0, 2).join(',');
+    const mergeKey = b.layer === 'world' && streetSurface(b.color) === 'concrete'
+      ? `${cell}:${surfaceMaterial.uniqueId}:${b.collision}:${shadow}` : key;
+    const existing = combined.get(mergeKey);
+    if (!existing) combined.set(mergeKey, { key, batch: b });
+    else {
+      const offset = existing.batch.positions.length / 3;
+      for (const value of b.positions) existing.batch.positions.push(value);
+      for (const index of b.indices) existing.batch.indices.push(offset + index);
+    }
+  }
   const meshes: Mesh[] = [];
   const fullBatches = new Map<string, Mesh>();
-  for (const [key, b] of batches) {
+  for (const { key, batch: b } of combined.values()) {
     const mesh = new Mesh(`street-${key}`, scene), vertexData = new VertexData();
     vertexData.positions = b.positions; vertexData.indices = b.indices;
     const normals: number[] = []; VertexData.ComputeNormals(b.positions, b.indices, normals); vertexData.normals = normals;

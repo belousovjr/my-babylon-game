@@ -36,6 +36,8 @@ engine.renderEvenInBackground = false;
 const scene = new Scene(engine);
 scene.clearColor = Color4.FromHexString('#bacbccff');
 scene.collisionsEnabled = true;
+// Selection uses clicks; camera motion needs no triangle picking under the pointer.
+scene.skipPointerMovePicking = true;
 const lighting = new DayNight(scene);
 const cameras = new SceneCameras(scene);
 const { camera, followCamera, cameraBoom } = cameras;

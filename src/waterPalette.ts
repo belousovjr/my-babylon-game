@@ -27,6 +27,7 @@ export class WaterPalette extends MaterialPluginBase {
     const color = this._material.getClassName().startsWith('PBR') ? 'finalColor' : 'color';
     return {
       CUSTOM_FRAGMENT_BEFORE_FRAGCOLOR: `
+        if (vPositionW.y < ${WATER_LEVEL}) {
         float waterPaletteMask = 1. - smoothstep(${WATER_LEVEL - .06}, ${WATER_LEVEL}, vPositionW.y);
         ${color}.rgb *= mix(vec3(1.), vec3(.9, 1., 1.03), waterPaletteMask);
         float waterRayLength = length(vPositionW - vEyePosition.xyz);
@@ -34,6 +35,7 @@ export class WaterPalette extends MaterialPluginBase {
         float landFog = clamp((waterRayLength - waterFog.z) * waterFog.y, 0., 1.);
         float underwaterFog = clamp(waterRayLength * waterRayFraction * (waterFog.x - waterFog.y) / max(1. - landFog, .001), 0., 1.);
         ${color}.rgb = mix(${color}.rgb, vec3(.04, .17, .18) * waterFog.w, underwaterFog * waterPaletteMask);
+        }
       `,
     };
   }

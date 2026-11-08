@@ -22,8 +22,11 @@ export class SurfaceDetail extends MaterialPluginBase {
   getCustomCode(shaderType: string) {
     if (shaderType !== 'fragment') return null;
     return {
+      CUSTOM_FRAGMENT_MAIN_BEGIN: `float surfaceDetailFade = smoothstep(${RENDER_SETTINGS.surfaceFade[0].toFixed(1)}, ${RENDER_SETTINGS.surfaceFade[1].toFixed(1)}, length(vPositionW - vEyePosition.xyz));`,
+      // Beyond the fade, these samples are completely overwritten by the measured average.
+      '!baseColor=TEXRD\\(diffuseSampler,vDiffuseUV\\+uvOffset\\);': `baseColor = vec4(surfaceMean.rgb, 1.); if (surfaceDetailFade < 1.) { baseColor = TEXRD(diffuseSampler,vDiffuseUV+uvOffset); }`,
+      '!baseAmbientColor=TEXRD\\(ambientSampler,vAmbientUV\\+uvOffset\\)\\.rgb\\*vAmbientInfos\\.y;': `baseAmbientColor = vec3(surfaceMean.a); if (surfaceDetailFade < 1.) { baseAmbientColor = TEXRD(ambientSampler,vAmbientUV+uvOffset).rgb*vAmbientInfos.y; }`,
       CUSTOM_FRAGMENT_BEFORE_LIGHTS: `
-        float surfaceDetailFade = smoothstep(${RENDER_SETTINGS.surfaceFade[0].toFixed(1)}, ${RENDER_SETTINGS.surfaceFade[1].toFixed(1)}, length(vPositionW - vEyePosition.xyz));
         vec3 surfaceAverage = surfaceMean.rgb;
         #if defined(VERTEXCOLOR) || defined(INSTANCESCOLOR) && defined(INSTANCES)
           surfaceAverage *= vColor.rgb;
