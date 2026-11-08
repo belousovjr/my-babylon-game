@@ -43,16 +43,25 @@ test('crossfade preserves normalized weights through interruptions and stops unu
   scene.dispose(); engine.dispose();
 });
 
-test('landing does not interpolate a horizontal flight pose through the floor', () => {
+test('flight transitions use the same continuous crossfade as every other animation', () => {
   const engine=new NullEngine(),scene=new Scene(engine),target={angle:0};
-  const groups=['Fly_Loop','Jump_Land'].map((name,i)=>{
+  const names=['Fly_Loop','Fly_Idle_Loop','Jump_Land','Jump_Loop','Idle_Loop','Walk_Loop','Sprint_Loop','Gallop_Loop','Swim_Fwd_Loop','Swim_Idle_Loop'];
+  const groups=names.map((name,i)=>{
     const animation=new Animation(name,'angle',30,Animation.ANIMATIONTYPE_FLOAT,Animation.ANIMATIONLOOPMODE_CYCLE);
     animation.setKeys([{frame:0,value:i},{frame:30,value:i}]);
     const group=new AnimationGroup(name,scene);group.addTargetedAnimation(animation,target);return group;
   });
-  const blend=new AnimationBlend(groups);
-  blend.update('Fly_Loop',.1);blend.update('Jump_Land',0);
-  assert.equal(groups[0].isPlaying,false);assert.equal(groups[1].weight,1);
-  assert.equal(groups[1].loopAnimation,false);
+  for(const from of names) for(const to of names.filter(n=>n!==from)) {
+    groups.forEach(g=>g.stop());
+    const blend=new AnimationBlend(groups);
+    blend.update(from,.1);blend.update(to,0);
+    const old=groups.find(g=>g.name===from)!,next=groups.find(g=>g.name===to)!;
+    assert.equal(old.weight,1);assert.equal(next.weight,0);assert.ok(old.isPlaying);
+    assert.equal(blend.transitioning,true);
+    blend.update(to,.075);
+    assert.ok(Math.abs(old.weight-.5)<1e-8);assert.ok(Math.abs(next.weight-.5)<1e-8);
+    blend.update(to,.075);assert.equal(next.weight,1);assert.equal(old.isPlaying,false);
+    assert.equal(next.loopAnimation,to!=='Jump_Land');assert.equal(blend.transitioning,false);
+  }
   scene.dispose();engine.dispose();
 });

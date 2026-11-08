@@ -1,7 +1,7 @@
 import type { Scene } from '@babylonjs/core/scene.js';
 import type { Material } from '@babylonjs/core/Materials/material.js';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
-import type { Mesh } from '@babylonjs/core/Meshes/mesh.js';
+import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode.js';
 import { ImportMeshAsync } from '@babylonjs/core/Loading/sceneLoader.js';
 import '@babylonjs/loaders/glTF/2.0/glTFLoader.js';
@@ -26,6 +26,25 @@ export class Character {
     this.body.ellipsoid.set(0.35, 0.9, 0.35); this.body.ellipsoidOffset.set(0, 0.9, 0);
     this.visual = new TransformNode('player-visual', scene);
     this.visual.parent = this.body;
+    scene.onAfterAnimationsObservable.add(() => {
+      const dt = Math.min(scene.getEngine().getDeltaTime() / 1000, .1);
+      if (this.state.grounded && (this.blend?.transitioning || Math.abs(this.visual.rotation.x) + Math.abs(this.visual.rotation.z) > .001)) {
+        const previous = this.visual.position.y;
+        this.visual.position.y = 0;
+        this.visual.computeWorldMatrix(true);
+        let bottom = Infinity;
+        // Only sample the animated geometry during landing; the collision capsule stays unchanged.
+        for (const mesh of this.visual.getChildMeshes()) {
+          mesh.computeWorldMatrix(true);
+          if (mesh instanceof Mesh) {
+            mesh.skeleton?.prepare(true);
+            mesh.refreshBoundingInfo({ applySkeleton: true });
+            bottom = Math.min(bottom, mesh.getBoundingInfo().boundingBox.minimumWorld.y);
+          }
+        }
+        this.visual.position.y = Math.max(0, this.body.position.y - bottom, previous * Math.exp(-12 * dt));
+      } else this.visual.position.y *= Math.exp(-12 * dt);
+    });
     this.fallback = MeshBuilder.CreateCapsule('loading-avatar', { height: 1.8, radius: 0.3 }, scene);
     this.fallback.position.y = 0.9; this.fallback.parent = this.visual; this.fallback.isPickable = false; this.fallback.material = fallbackMaterial;
   }
@@ -65,9 +84,8 @@ export class Character {
     const tilt = freeMovement && this.state.moving ? -this.state.pitch : 0;
     const turn = Math.atan2(Math.sin(this.state.facing - this.visual.rotation.y), Math.cos(this.state.facing - this.visual.rotation.y));
     const bank = freeMovement && this.state.moving ? Math.max(-.35, Math.min(.35, -turn * .5)) : 0;
-    // Reset the pose immediately on contact: easing a tilted body upright can cut through the floor.
-    this.visual.rotation.x = freeMovement ? this.visual.rotation.x + (tilt - this.visual.rotation.x) * Math.min(1, 12 * dt) : 0;
-    this.visual.rotation.z = freeMovement ? this.visual.rotation.z + (bank - this.visual.rotation.z) * Math.min(1, 12 * dt) : 0;
+    this.visual.rotation.x += (tilt - this.visual.rotation.x) * Math.min(1, 12 * dt);
+    this.visual.rotation.z += (bank - this.visual.rotation.z) * Math.min(1, 12 * dt);
   }
   animate(dt: number) {
     const state = this.state.mode === 'fly' ? this.state.moving ? 'Fly_Loop' : 'Fly_Idle_Loop'

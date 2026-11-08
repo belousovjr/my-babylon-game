@@ -11,14 +11,11 @@ export class AnimationBlend {
 
   constructor(groups: AnimationGroup[]) { this.groups = groups; }
 
+  get transitioning() { return this.from.size > 0; }
+
   update(name: string, dt: number) {
     const next = this.groups.find(group => group.name === name);
     if (!next) return;
-    // A flight-to-ground crossfade interpolates horizontal legs through the floor.
-    if ((name === 'Jump_Land' || name === 'Jump_Loop') && this.active?.name.startsWith('Fly_')) {
-      for (const group of this.groups) group.stop();
-      this.from.clear(); this.active = undefined;
-    }
     if (!this.active) {
       next.weight = 1; next.start(name !== 'Jump_Land', 1); this.active = next;
       return;
