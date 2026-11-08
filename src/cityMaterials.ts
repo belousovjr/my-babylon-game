@@ -67,8 +67,9 @@ export class CityMaterials {
     material.diffuseColor = Color3.FromHexString(color);
     const glass = surface === 'facade-glass' || surface === 'facade-dark', metal = surface === 'metal', water = surface === 'water';
     material.specularColor = glass ? new Color3(0.12, 0.13, 0.14) : metal ? new Color3(0.12, 0.12, 0.11) : water ? new Color3(0.3, 0.34, 0.35) : new Color3(0.025, 0.025, 0.025);
+    if (level === 0 && (surface === 'facade-stone' || surface === 'facade-brick')) material.specularColor = new Color3(0.32, 0.34, 0.35);
     if (surface === 'plain' || surface === 'light') material.specularColor = Color3.Black();
-    material.specularPower = glass ? 96 : water ? 128 : metal ? 48 : 16;
+    material.specularPower = glass || level === 0 && (surface === 'facade-stone' || surface === 'facade-brick') ? 96 : water ? 128 : metal ? 48 : 16;
     material.roughness = glass ? 0.22 : water ? 0.16 : metal ? 0.48 : 0.9;
     if (water) { material.backFaceCulling = false; new WaterSurface(material); }
     if (glass || metal || water) {

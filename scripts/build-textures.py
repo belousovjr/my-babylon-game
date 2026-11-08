@@ -42,6 +42,16 @@ def save_set(out, name, color, ao, normal, roughness=None):
     specular = Image.new('RGBA', (256, 256), (*strength, 255))
     roughness = roughness if roughness is not None else Image.new('L', color.size, 90 if name in ('facade-glass', 'facade-dark', 'water') else 205)
     specular.putalpha(ImageOps.invert(roughness.convert('L')).resize((256, 256), Image.Resampling.LANCZOS))
+    if name in ('facade-stone', 'facade-brick'):
+        specular = Image.new('RGBA', color.size, (6, 6, 6, 35))
+        pane = ImageDraw.Draw(specular)
+        grid = FACADE_LAYOUT['masonry']
+        for row in range(grid['rows']):
+            for col in range(grid['columns']):
+                pane.rectangle((round(col * color.width / grid['columns']) + grid['insetX'],
+                    round(row * color.height / grid['rows']) + grid['insetTop'],
+                    round((col + 1) * color.width / grid['columns']) - grid['insetX'] - 1,
+                    round((row + 1) * color.height / grid['rows']) - grid['insetBottom']), fill=(160, 170, 175, 220))
     specular.save(out / f'{name}-specular.webp', lossless=True, method=6)
 
 
@@ -71,6 +81,11 @@ def facade(base, masonry=False, dark=False):
             shade = rng.randrange(48, 71) if masonry else rng.randrange(57, 82)
             glass = (shade, shade + 4, shade + 5) if not dark else (round(shade * .52), round(shade * .49), round(shade * .42))
             draw.rectangle(box, fill=glass)
+            if masonry:
+                # Muted sky reflection stays inside the pane; masonry and frames keep their original colour.
+                for y in range(box[1], box[3] + 1):
+                    sky = 1 - (y - box[1]) / max(1, box[3] - box[1])
+                    draw.line((box[0], y, box[2], y), fill=(shade + round(10 + 18 * sky), shade + round(19 + 23 * sky), shade + round(22 + 27 * sky)))
             draw.line((box[0], box[1], box[2], box[1]), fill=tuple(min(255, c + 9) for c in glass))
             shadow.rectangle((box[0] - 1, box[1] - 1, box[2] + 1, box[3] + 1), fill=222 if masonry else 244)
             shadow.rectangle(box, fill=245)

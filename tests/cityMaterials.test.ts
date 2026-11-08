@@ -91,3 +91,16 @@ test('every bundled city texture has maps and all LOD variants within a small do
   }
   assert.ok(readdirSync(folder).reduce((sum, name) => sum + statSync(new URL(name, folder)).size, 0) < 3 * 1024 * 1024);
 });
+
+test('masonry window glints use a pane mask nearby and keep distant walls matte', () => {
+  const engine = new NullEngine(), scene = new Scene(engine), materials = new CityMaterials(scene, '/');
+  for (const surface of ['facade-stone', 'facade-brick'] as const) {
+    const near = materials.get('#ffffff', surface, 0), far = materials.get('#ffffff', surface, 2);
+    assert.ok(near.specularTexture, 'bright glints must have a texture mask');
+    assert.ok(near.useGlossinessFromSpecularMapAlpha);
+    assert.equal(near.specularPower, 96);
+    assert.ok(far.specularColor.r < .03);
+    assert.equal(far.reflectionTexture, null);
+  }
+  scene.dispose(); engine.dispose();
+});
