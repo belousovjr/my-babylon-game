@@ -25,6 +25,7 @@ import { AnimationBlend } from './animationBlend';
 import { LodTransitions, lodDistance, predictLodEye } from './lodTransitions';
 import { CityMaterials, buildingSurface, streetSurface, facadeVariant } from './cityMaterials';
 import { DayNight } from './dayNight';
+import { Beacons } from './beacons';
 import './style.css';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
@@ -128,6 +129,7 @@ const cameraBoom = new FollowCamera();
 scene.activeCamera = followCamera;
 
 const cityMaterials = new CityMaterials(scene, import.meta.env.BASE_URL);
+const beacons = new Beacons(scene);
 const originalTemplateColors = new Map(createWorld().templates.map(template => [template.id, template.color]));
 const timeStorageKey = 'block-district-time-of-day-v1';
 try {
@@ -199,6 +201,7 @@ function attachModel(root: Mesh, template: ObjectTemplate, color: string, pickab
     return instance;
   });
   attachCollisionGeometry(root, sources[0]!);
+  beacons.add(root, template);
   modelLevels.set(root, levels);
 }
 function addMesh(o: WorldObject) {
@@ -647,6 +650,7 @@ engine.runRenderLoop(() => {
   for (const root of modelLevels.keys()) lodTransitions.opacity(root, root.visibility);
   lodTransitions.update(dt);
   cityMaterials.setNight(lighting.night);
+  beacons.update(dt);
   lighting.update(eye, dt);
   scene.render();
   if (starting && characterReady && scene.isReady()) {

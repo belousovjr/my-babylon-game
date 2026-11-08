@@ -7,6 +7,13 @@ import type { ObjectTemplate } from './world';
 export const PROFILES = ['box', 'glass', 'stone', 'deco', 'bundled', 'rounded', 'marina', 'gothic', 'clock', 'tree', 'lamp', 'traffic_signal'] as const;
 export type Profile = typeof PROFILES[number];
 
+export function spireTips(profile?: Profile): [number, number, number][] {
+  if (profile === 'bundled') return [[0, 0.5, 0], [0.2, 0.5, 0]];
+  if (profile === 'rounded' || profile === 'deco') return [[0.08, 0.5, 0]];
+  if (profile === 'clock' || profile === 'gothic') return [[0, 0.5, 0]];
+  return [];
+}
+
 export function setArchitectureStatic(root: Mesh, frozen: boolean) {
   for (const mesh of [root, ...root.getChildMeshes()]) {
     if (frozen) mesh.freezeWorldMatrix();
@@ -81,7 +88,7 @@ export function buildArchitecture(template: ObjectTemplate, scene: Scene, materi
         const z = (Math.floor(i / 3) - 1) * 0.22;
         part(x, -0.5 + h * 0.47, z, 0.2, h * 0.94, 0.22);
       });
-      if (detail === 0) for (const i of [4, 5]) {
+      for (const i of [4, 5]) {
         const roof = -0.5 + heights[i]! * 0.94;
         part((i % 3 - 1) * 0.2, (roof + 0.5) / 2, 0, 0.012, 0.5 - roof, 0.012, 1.4);
       }
