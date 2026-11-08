@@ -43,12 +43,13 @@ test('second jump activates hover; flight has three speeds and lands on surface 
   step(3);input.jump=true;step();input.jump=false;step(12);
   assert.equal(state.mode,'walk');input.jump=true;input.fly=true;step();input.jump=false;input.fly=false;
   assert.equal(state.mode,'fly');const y=body.position.y;step(60);assert.ok(Math.abs(body.position.y-y)<.001);
-  input.up=true;step(30);input.up=false;assert.ok(body.position.y>y+1.5);
-  input.z=1;const z=body.position.z;step(60);assert.ok(Math.abs(body.position.z-z-25.6)<.05);
+  input.up=true;step(30);input.up=false;assert.ok(body.position.y>y+1.5);step(60);
+  input.z=1;step(60);const z=body.position.z;step(60);assert.ok(Math.abs(body.position.z-z-25.6)<.05);
   input.run=true;input.z=0;step();input.z=1;step();assert.equal(state.superRunning,false);
   // Run, release, retap to reach the third speed in flight too.
   step();input.z=0;step();input.z=1;step();assert.equal(state.superRunning,true);
-  const fast=body.position.z;step(30);assert.ok(Math.abs(body.position.z-fast-98)<.05);
+  step(120);const fast=body.position.z;step(30);assert.ok(Math.abs(body.position.z-fast-98)<.05);
+  body.position.x=body.position.z=0;
   input.z=0;input.run=false;input.down=true;step(180);
   assert.equal(state.mode,'walk');assert.ok(Math.abs(body.position.y)<.05);assert.equal(state.grounded,true);
   f.dispose();
@@ -95,18 +96,18 @@ test('fast flight stops at walls and walking off a ledge cannot trigger flight',
   const wall=MeshBuilder.CreateBox('flight-wall',{width:20,height:20,depth:1},scene);
   wall.position.set(0,5,5);wall.material=floor.material;wall.checkCollisions=true;wall.metadata={worldId:'wall'};wall.computeWorldMatrix(true);
   body.surroundingMeshes=[floor,wall];body.position.set(0,3,0);
-  state.mode='fly';state.superRunning=true;state.forwardDown=true;input.z=1;input.run=true;
-  step(30);assert.equal(state.mode,'walk');assert.ok(body.position.z<4.2,'fast flight cannot tunnel through a wall');
+  state.mode='fly';state.flightVelocity.set(0,0,196);state.superRunning=true;state.forwardDown=true;input.z=1;input.run=true;
+  step(30);assert.equal(state.mode,'walk');assert.equal(state.flightVelocity.length(),0);assert.ok(body.position.z<4.2,'fast flight cannot tunnel through a wall');
   f.dispose();
 });
 
 test('flight steers vertically with the camera and lands before its pitched pose enters a floor',()=>{
   const f=setup(),{body,state,input,step}=f;
   state.mode='fly';body.position.y=20;input.z=1;input.pitch=Math.PI/6;
-  const y=body.position.y;step(30);assert.ok(Math.abs(body.position.y-y-6.4)<.02);
+  step(30);const y=body.position.y;step(30);assert.ok(Math.abs(body.position.y-y-6.4)<.02);
   assert.ok(Math.abs(state.pitch-Math.PI/6)<.001);
-  input.run=true;input.pitch=0;const z=body.position.z;step(30);assert.ok(Math.abs(body.position.z-z-28)<.02,'fast flight is 56 m/s');
-  input.pitch=-1;body.position.set(0,2,0);
+  input.run=true;input.pitch=0;step(60);const z=body.position.z;step(30);assert.ok(Math.abs(body.position.z-z-28)<.02,'fast flight is 56 m/s');
+  input.pitch=-1;state.flightVelocity.set(0,0,0);body.position.set(0,2,0);
   let earlyLanding=false;
   for(let i=0;i<120;i++) {
     const flying=state.mode==='fly';step();
@@ -189,7 +190,7 @@ test('flight request works during a fall and swimming without a preceding jump',
   swimming.input.up=true;swimming.step(30);swimming.input.up=false;
   assert.equal(swimming.state.mode,'fly');
   assert.ok(swimming.body.position.y>WATER_LEVEL,'flight crosses the water surface without the swim height limit');
-  const hover=swimming.body.position.y;swimming.step(15);
+  swimming.step(60);const hover=swimming.body.position.y;swimming.step(15);
   assert.ok(Math.abs(swimming.body.position.y-hover)<.001);
   swimming.dispose();
 });
@@ -207,4 +208,25 @@ test('flight cancellation restores gravity in air and swimming underwater; a sin
   controls.stopFlight=true;step();controls.stopFlight=false;
   assert.equal(state.mode,'swim');step();assert.equal(state.mode,'swim');
   f.dispose();
+});
+
+test('flight turns and brakes progressively, with greater inertia at higher speeds',()=>{
+  for(const speed of [25.6,56,196]) {
+    const f=setup(),{body,state,input,step}=f;
+    body.position.y=100;state.mode='fly';state.flightVelocity.set(0,0,speed);
+    input.z=1;input.yaw=0;input.run=speed>25.6;
+    state.superRunning=speed===196;state.forwardDown=true;
+    step();
+    assert.ok(state.flightVelocity.z>speed-4.01,'previous direction persists after steering');
+    assert.ok(state.flightVelocity.x<0 && state.flightVelocity.x>=-4.01,'turn acceleration is bounded');
+    const turn=Math.atan2(-state.flightVelocity.x,state.flightVelocity.z);
+    assert.ok(turn<4.5/speed,'angular response decreases as speed grows');
+    input.z=0;const before=state.flightVelocity.length();step();
+    assert.ok(Math.abs(state.flightVelocity.length()-(before-160/60))<1e-6);
+    assert.equal(state.moving,true,'coasting keeps the flight animation active');
+    step(Math.ceil(before/160*60)+1);
+    assert.equal(state.flightVelocity.length(),0);assert.equal(state.moving,false);
+    const stopped=body.position.clone();step(10);assert.ok(body.position.equalsWithEpsilon(stopped));
+    f.dispose();
+  }
 });

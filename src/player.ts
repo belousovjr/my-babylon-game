@@ -6,9 +6,9 @@ import type { Mesh } from '@babylonjs/core/Meshes/mesh.js';
 import type { Scene } from '@babylonjs/core/scene.js';
 
 export interface PlayerInput { x: number; z: number; yaw: number; pitch?: number; steer?: boolean; run: boolean; jump: boolean; fly?: boolean; stopFlight?: boolean; up?: boolean; down?: boolean; forwardPressed?: boolean; forwardReleased?: boolean }
-export interface PlayerState { verticalSpeed: number; grounded: boolean; moving: boolean; running: boolean; facing: number; pitch: number; moveYaw: number | null; movePitch: number; mode: 'walk' | 'fly' | 'swim'; superRunning: boolean; forwardDown: boolean; sprintTap: number; landing: number }
+export interface PlayerState { flightVelocity: Vector3; verticalSpeed: number; grounded: boolean; moving: boolean; running: boolean; facing: number; pitch: number; moveYaw: number | null; movePitch: number; mode: 'walk' | 'fly' | 'swim'; superRunning: boolean; forwardDown: boolean; sprintTap: number; landing: number }
 export function initialPlayerState(): PlayerState {
-  return { verticalSpeed: 0, grounded: false, moving: false, running: false, facing: 0, pitch: 0, moveYaw: null, movePitch: 0, mode: 'walk', superRunning: false, forwardDown: false, sprintTap: 0, landing: 0 };
+  return { flightVelocity: Vector3.Zero(), verticalSpeed: 0, grounded: false, moving: false, running: false, facing: 0, pitch: 0, moveYaw: null, movePitch: 0, mode: 'walk', superRunning: false, forwardDown: false, sprintTap: 0, landing: 0 };
 }
 
 // Input and simulation stay separate from the camera, keyboard and character animations.
@@ -63,6 +63,14 @@ export function stepPlayer(scene: Scene, body: Mesh, state: PlayerState, input: 
   if (state.mode === 'fly') {
     displacement.y += (Number(!!input.up) - Number(!!input.down)) * speed;
     if (displacement.length() > speed) displacement.normalize().scaleInPlace(speed);
+    // Bounded acceleration makes both the turning radius and stopping distance grow with speed.
+    const change = displacement.subtract(state.flightVelocity);
+    const limit = (displacement.lengthSquared() < .000001 ? 160 : 240) * dt;
+    if (change.length() > limit) change.normalize().scaleInPlace(limit);
+    state.flightVelocity.addInPlace(change);
+    if (state.flightVelocity.lengthSquared() < .000001) state.flightVelocity.setAll(0);
+    displacement.copyFrom(state.flightVelocity);
+    state.moving = displacement.lengthSquared() > .000001;
     state.verticalSpeed = 0;
     state.grounded = false;
   } else if (state.mode === 'swim') {
@@ -98,5 +106,7 @@ export function stepPlayer(scene: Scene, body: Mesh, state: PlayerState, input: 
     if (displacement.y < 0 && body.position.y - previous.y > displacement.y + .005) { state.grounded = true; state.landing = .25; }
   }
   if (state.verticalSpeed > 0 && body.position.y - previous.y < displacement.y * .5) state.verticalSpeed = 0;
-  if (state.moving) state.facing = Math.atan2(direction.x, direction.z);
+  if (state.mode !== 'fly') state.flightVelocity.setAll(0);
+  if (state.moving) state.facing = state.mode === 'fly'
+    ? Math.atan2(state.flightVelocity.x, state.flightVelocity.z) : Math.atan2(direction.x, direction.z);
 }

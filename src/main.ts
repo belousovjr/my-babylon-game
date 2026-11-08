@@ -63,6 +63,7 @@ function refreshNearbySources() {
 const character = new Character(scene, cityMaterials.get('#d4a663', 'plain'));
 const player = character.body;
 const visual = character.visual;
+const flightCameraTarget = new Vector3(0, 1.55, 0);
 async function loadCharacter() {
   try {
     await character.load(import.meta.env.BASE_URL);
@@ -106,7 +107,9 @@ engine.runRenderLoop(() => {
   if (!starting && !editor.editing && !document.hidden) {
     accumulator += dt;
     while (accumulator >= 1 / 60) { simulate(1 / 60); accumulator -= 1 / 60; }
-    camera.target.copyFrom(player.position).addInPlaceFromFloats(0, 1.15, 0);
+    if (character.state.mode === 'fly') {
+      Vector3.TransformCoordinatesToRef(flightCameraTarget, visual.computeWorldMatrix(true), camera.target);
+    } else camera.target.copyFrom(player.position).addInPlaceFromFloats(0, 1.15, 0);
     character.animate(dt);
   } else { accumulator = 0; }
   if (!editor.editing) {
