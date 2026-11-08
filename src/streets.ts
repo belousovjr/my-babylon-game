@@ -92,7 +92,7 @@ export function drawChicagoStreets(scene: Scene, material: (color: string, lod: 
       [x + a! * width / 2 * cos + b! * depth / 2 * sin, z - a! * width / 2 * sin + b! * depth / 2 * cos]);
     surface([[p[0]!, p[1]!, p[2]!], [p[0]!, p[2]!, p[3]!]], 0.055, '#c3baa1', false);
   }
-  function walls(lines: number[][][], bottom: number | ((x: number, z: number) => number), top: number, color: string) {
+  function walls(lines: number[][][], bottom: number | ((x: number, z: number) => number), top: number, color: string, collision = true) {
     if (typeof bottom === 'function') lines = lines.map(line => line.flatMap((a, i) => {
       const c = line[i + 1];
       if (!c) return [a];
@@ -106,7 +106,7 @@ export function drawChicagoStreets(scene: Scene, material: (color: string, lod: 
         const a = sections[i - 1]!, c = sections[i]!;
         const lowA = typeof bottom === 'number' ? bottom : bottom(a.point[0]!, a.point[1]!);
         const lowC = typeof bottom === 'number' ? bottom : bottom(c.point[0]!, c.point[1]!);
-        const b = batch((a.point[0]! + c.point[0]!) / 2, (a.point[1]! + c.point[1]!) / 2, color, true);
+        const b = batch((a.point[0]! + c.point[0]!) / 2, (a.point[1]! + c.point[1]!) / 2, color, collision);
         const al = [a.left[0]!, lowA, a.left[1]!], ar = [a.right[0]!, lowA, a.right[1]!];
         const cl = [c.left[0]!, lowC, c.left[1]!], cr = [c.right[0]!, lowC, c.right[1]!];
         const alt = [al[0]!, top, al[2]!], art = [ar[0]!, top, ar[2]!];
@@ -137,8 +137,8 @@ export function drawChicagoStreets(scene: Scene, material: (color: string, lod: 
   drawTerrain();
   surface(data.roadSurface, 0.03, '#454e50', true);
   surface(data.sidewalks, elevationAt(0, 0, 'sidewalk'), '#b6b2a4', true);
-  surface(data.curbs, 0.18, '#c0bba9', true);
-  for (const edge of data.pavingEdges) walls(edge.lines, 0, edge.top, edge.color);
+  surface(data.curbs, 0.18, '#c0bba9', false);
+  for (const edge of data.pavingEdges) walls(edge.lines, 0, edge.top, edge.color, false);
   detailLayer = 'marking';
   for (detailLevel of [0, 1]) {
     for (const crossing of data.crosswalks) {
@@ -184,7 +184,7 @@ export function drawChicagoStreets(scene: Scene, material: (color: string, lod: 
     surface(railway.deck, 5.65, '#505b55', true, true);
     walls(railway.edges, 5.65, 6, '#505b55');
     surface(railway.rails, 6.16, '#959b92', false);
-    walls(railway.railEdges, 6, 6.16, '#959b92');
+    walls(railway.railEdges, 6, 6.16, '#959b92', false);
     detailLayer = 'rail-structure';
     for (detailLevel of [0, 1]) {
       for (const truss of railway.bridgeTrusses) {
