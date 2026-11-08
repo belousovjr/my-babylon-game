@@ -68,9 +68,9 @@ test('city materials share textures, simplify distant shaders, and keep lights a
   assert.equal(facadeVariant('building-12'), facadeVariant('building-12'));
   assert.ok(new Set(Array.from({length: 20}, (_, i) => facadeVariant(`building-${i}`))).size === 3);
   const street = materials.get('#ffffff', 'asphalt', 0, 0, 0, true);
-  assert.equal(street.lightmapTexture.coordinatesIndex, 1);
-  materials.setNight(1); assert.equal(street.lightmapTexture.level, 1);
-  materials.setNight(0); assert.equal(street.lightmapTexture.level, 0);
+  assert.equal(street.lightmapTexture, null);
+  materials.setNight(1); assert.equal(street.lightmapTexture.level, 1); assert.equal(street.lightmapTexture.coordinatesIndex, 1);
+  materials.setNight(0); assert.equal(street.lightmapTexture, null);
   scene.dispose(); engine.dispose();
 });
 
@@ -124,5 +124,18 @@ test('roof materials always win depth conflicts against facade and accent materi
     assert.ok(roof.zOffset<facade.zOffset && roof.zOffset<accent.zOffset);
     assert.ok(roof.zOffsetUnits<facade.zOffsetUnits);
   }
+  scene.dispose();engine.dispose();
+});
+
+
+test('day shaders disconnect night maps and restore the same textures at dusk',()=>{
+  const engine=new NullEngine(),scene=new Scene(engine),materials=new CityMaterials(scene,'/');
+  const facade=materials.get('#ffffff','facade-stone'),road=materials.get('#ffffff','asphalt',0,0,0,true);
+  assert.equal(facade.emissiveTexture,null);assert.equal(road.lightmapTexture,null);
+  materials.setNight(.5);const emission=facade.emissiveTexture,lightmap=road.lightmapTexture;
+  assert.ok(emission && lightmap);assert.equal(emission.level,.84);
+  materials.setNight(0);assert.equal(facade.emissiveTexture,null);assert.equal(road.lightmapTexture,null);
+  materials.setNight(1);assert.equal(facade.emissiveTexture,emission);assert.equal(road.lightmapTexture,lightmap);
+  const late=materials.get('#ffffff','facade-brick',2);assert.ok(late.emissiveTexture,'materials created at night start with emission');
   scene.dispose();engine.dispose();
 });

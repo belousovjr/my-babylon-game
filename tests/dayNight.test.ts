@@ -77,8 +77,8 @@ test('window and lamp emission updates at every LOD without adding textures to l
   }
   assert.equal(lamp.getActiveTextures().length, 0);assert.ok(lamp.emissiveColor.r > .9);
   materials.setNight(0);assert.equal(lamp.emissiveColor.r, 0);
-  assert.ok(facades.every(material => material.emissiveTexture.level === 0));
-  assert.equal(materials.get('#ffffff', 'facade-stone').emissiveTexture.level, 0, 'new/editor materials inherit current time');
+  assert.ok(facades.every(material => material.emissiveTexture === null));
+  assert.equal(materials.get('#ffffff', 'facade-stone').emissiveTexture, null, 'new/editor materials inherit current time');
   scene.dispose(); engine.dispose();
 });
 

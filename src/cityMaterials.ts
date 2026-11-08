@@ -48,6 +48,7 @@ export class CityMaterials {
   private textures = new Map<string, Texture>();
   private environment: CubeTexture | undefined;
   private night = 0;
+  private nightMaps = new Map<StandardMaterial, { emission: Texture | null; lightmap: Texture | null }>();
   private luminous = new Set<StandardMaterial>();
   private scene: Scene;
   private baseUrl: string;
@@ -118,6 +119,10 @@ export class CityMaterials {
       this.luminous.add(material);
       material.emissiveColor = new Color3(this.night, this.night * 0.84, this.night * 0.6);
     }
+    if (material.emissiveTexture || material.lightmapTexture) {
+      this.nightMaps.set(material, { emission: material.emissiveTexture as Texture | null, lightmap: material.lightmapTexture as Texture | null });
+      if (this.night === 0) { material.emissiveTexture = null; material.lightmapTexture = null; }
+    }
     DitheredTileFadeMaterialPlugin.GetOrCreate(material);
     // Dynamic light membership and time uniforms use Babylon's normal material updates.
     this.materials.set(key, material);
@@ -126,6 +131,10 @@ export class CityMaterials {
 
   setNight(night: number) {
     if (night === this.night) return;
+    if ((night === 0) !== (this.night === 0)) for (const [material, maps] of this.nightMaps) {
+      material.emissiveTexture = night > 0 ? maps.emission : null;
+      material.lightmapTexture = night > 0 ? maps.lightmap : null;
+    }
     this.night = night;
     for (const [name, texture] of this.textures) if (name.includes('-emission-')) texture.level = night * 1.68;
     const street = this.textures.get('street-lightmap');

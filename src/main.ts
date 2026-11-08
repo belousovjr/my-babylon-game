@@ -1,3 +1,4 @@
+import { visualCandidates } from './sceneCandidates';
 import { createEditor } from './editor';
 import { RENDER_SETTINGS } from './renderSettings';
 import type { WorldData } from './world';
@@ -56,6 +57,8 @@ function updateActiveCell() {
   if (city.updateActiveCell(player.position, editor.editing)) { playerNeighborhood.invalidate(); cameraNeighborhood.invalidate(); }
 }
 function refreshNearbySources() {
+  const candidates = visualCandidates(scene.meshes);
+  scene.getActiveMeshCandidates = () => candidates;
   playerNeighborhood.setSources(scene.meshes.filter((mesh): mesh is Mesh => mesh instanceof Mesh && mesh.checkCollisions && (mesh.collisionGroup & player.collisionMask) !== 0 && !!mesh.metadata?.worldId));
   cameraNeighborhood.setSources([...city.meshes.values(), ...city.proceduralMeshes].filter(mesh => mesh.checkCollisions));
   lighting.setWorld(city.furnitureRoots.filter(root => root.metadata.templateId === 'lamp'),
