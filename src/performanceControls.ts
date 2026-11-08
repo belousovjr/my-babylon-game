@@ -1,5 +1,6 @@
 export const PERFORMANCE_OPTIONS = [
   ['shadows', 'Динамические тени'],
+  ['textures', 'Все текстуры'],
   ['materials', 'Детали материалов · normal / AO / блеск'],
   ['city', 'Город · здания и уличная геометрия'],
   ['trees', 'Деревья'],

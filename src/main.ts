@@ -117,6 +117,7 @@ bindPerformanceControls(performanceFlags, () => {
   const candidates = visualCandidates(scene.meshes, performanceFlags);
   scene.getActiveMeshCandidates = candidates.active;
   scene.shadowsEnabled = lighting.shadowsEnabled = performanceFlags.shadows;
+  scene.texturesEnabled = performanceFlags.textures;
   lighting.shadows.getShadowMap()!.resetRefreshCounter();
   MaterialFlags.BumpTextureEnabled = performanceFlags.materials;
   MaterialFlags.AmbientTextureEnabled = performanceFlags.materials;
