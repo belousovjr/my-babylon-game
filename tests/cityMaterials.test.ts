@@ -104,3 +104,15 @@ test('masonry window glints use a pane mask nearby and keep distant walls matte'
   }
   scene.dispose(); engine.dispose();
 });
+
+test('grass overlays terrain with a stable depth bias at every detail level', () => {
+  const engine = new NullEngine(), scene = new Scene(engine), materials = new CityMaterials(scene, '/');
+  for (const lod of [0, 1, 2]) {
+    const grass = materials.get('#ffffff', 'grass', lod, 0, 0, true);
+    const terrain = materials.get('#ffffff', 'concrete', lod, 0, 0, true);
+    assert.ok(grass.zOffset < terrain.zOffset);
+    assert.ok(grass.zOffsetUnits < terrain.zOffsetUnits);
+  }
+  assert.equal(materials.get('#ffffff', 'grass', 0, 3, 0, true).zOffset, -3);
+  scene.dispose(); engine.dispose();
+});
